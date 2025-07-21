@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Пополнение баланса</title>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+    <style>
+        /* Только минимальные необходимые исправления */
+        .custom-amount input {
+            width: 200px; /* Фиксированная ширина поля ввода */
+            padding: 10px 15px; /* Уменьшенные отступы */
+            font-size: 14px; /* Чуть меньший размер текста */
+        }
+
+        /* Убираем стрелки у числового ввода */
+        input[type="number"]::-webkit-inner-spin-button,
+        input[type="number"]::-webkit-outer-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+    </style>
+</head>
+<body>
+<div class="payment-container">
+    <header class="payment-header">
+        <h2>ПОПОЛНЕНИЕ БАЛАНСА</h2>
+        <button class="back-button" id="back-button">← Назад</button>
+    </header>
+
+    <div class="payment-card">
+        <div class="rate-info">
+            Курс: <strong>1 ⭐ = 1.4 ₽</strong>
+        </div>
+
+        <div class="preset-buttons">
+            <button class="preset-option" data-stars="100">100 ⭐<br><small>140 ₽</small></button>
+            <button class="preset-option" data-stars="500">500 ⭐<br><small>700 ₽</small></button>
+            <button class="preset-option" data-stars="1000">1000 ⭐<br><small>1400 ₽</small></button>
+        </div>
+
+        <div class="custom-amount">
+            <input type="number" id="custom-stars" placeholder="Введите количество звезд" min="10">
+            <div class="amount-preview" id="amount-preview"></div>
+        </div>
+
+        <button class="pay-button" id="pay-button">ПЕРЕЙТИ К ОПЛАТЕ</button>
+    </div>
+</div>
+
+<script src="payment.js"></script>
+</body>
+</html>

@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Мини-апп</title>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<!-- Приветственный экран -->
+<div class="welcome-screen" id="welcome-screen">
+    <div class="welcome-container">
+        <h1 class="app-title">Добро пожаловать <span>⭐</span><span class="cursor"></span></h1>
+        <p class="subtitle">Загрузка ваших данных...</p>
+    </div>
+</div>
+
+<!-- Основной интерфейс -->
+<div class="app-interface" id="app-interface">
+    <header class="header">
+        <div class="user-name" id="user-name"></div>
+        <div class="balance">
+            <span id="stars">0</span> ⭐
+            <button class="add-btn" id="add-stars">+</button>
+            <button id="refresh-balance" class="refresh-btn">⟳ Обновить</button>
+        </div>
+    </header>
+
+    <main class="content">
+        <div class="roulette-card" id="roulette-card">
+            <div class="roulette-header">
+                <div class="roulette-icon">🎰</div>
+                <div class="roulette-title">КЕЙСЫ</div>
+            </div>
+            <div class="roulette-body">
+                <div class="roulette-text">Выберите кейс и испытайте удачу!</div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>🎒 ИНВЕНТАРЬ</h2>
+            <div id="inventory-items" class="items-container">
+                <div class="empty-message">Инвентарь пуст</div>
+            </div>
+        </div>
+    </main>
+</div>
+
+<!-- Страница с кейсами -->
+<div class="cases-page" id="cases-page">
+    <button class="close-cases" id="close-cases">×</button>
+    <h2>ДОСТУПНЫЕ КЕЙСЫ</h2>
+    <div class="cases-container">
+        <div class="case-card" data-case="common">
+            <div class="case-emoji">📦</div>
+            <div class="case-title">Обычный кейс</div>
+            <div class="case-price">10 ⭐</div>
+        </div>
+        <div class="case-card" data-case="rare">
+            <div class="case-emoji">🎁</div>
+            <div class="case-title">Редкий кейс</div>
+            <div class="case-price">25 ⭐</div>
+        </div>
+        <div class="case-card" data-case="epic">
+            <div class="case-emoji">💎</div>
+            <div class="case-title">Эпический кейс</div>
+            <div class="case-price">50 ⭐</div>
+        </div>
+        <div class="case-card" data-case="legendary">
+            <div class="case-emoji">🏆</div>
+            <div class="case-title">Легендарный кейс</div>
+            <div class="case-price">100 ⭐</div>
+        </div>
+    </div>
+</div>
+
+<script src="app.js"></script>
+<script src="caseOpening.js"></script>
+<script src="roulette.js"></script>
+</body>
+</html>

@@ -1,0 +1,108 @@
+{
+  "cases": [
+    {
+      "type": "common",
+      "price": 74.5,
+      "price_rub": 111.75,
+      "image": "common_case.png",
+      "items": [
+        {
+          "name": "Сердце",
+          "image": "heart_item.png",
+          "emoji": "❤️",
+          "chance": 0.18,
+          "sell_price": 15,
+          "withdraw_price": 15
+        },
+        {
+          "name": "Плюшевый мишка",
+          "image": "teddy_bear.png",
+          "emoji": "🧸",
+          "chance": 0.18,
+          "sell_price": 15,
+          "withdraw_price": 15
+        },
+        {
+          "name": "Подарок",
+          "image": "gift_box.png",
+          "emoji": "🎁",
+          "chance": 0.15,
+          "sell_price": 25,
+          "withdraw_price": 25
+        },
+        {
+          "name": "Роза",
+          "image": "rose.png",
+          "emoji": "🌹",
+          "chance": 0.15,
+          "sell_price": 25,
+          "withdraw_price": 25
+        },
+        {
+          "name": "Торт",
+          "image": "cake.png",
+          "emoji": "🎂",
+          "chance": 0.10,
+          "sell_price": 50,
+          "withdraw_price": 50
+        },
+        {
+          "name": "Букет",
+          "image": "bouquet.png",
+          "emoji": "💐",
+          "chance": 0.08,
+          "sell_price": 50,
+          "withdraw_price": 50
+        },
+        {
+          "name": "Ракета",
+          "image": "rocket.png",
+          "emoji": "🚀",
+          "chance": 0.07,
+          "sell_price": 50,
+          "withdraw_price": 50
+        },
+        {
+          "name": "Кубок",
+          "image": "trophy.png",
+          "emoji": "🏆",
+          "chance": 0.04,
+          "sell_price": 100,
+          "withdraw_price": 100
+        },
+        {
+          "name": "Кольцо",
+          "image": "ring.png",
+          "emoji": "💍",
+          "chance": 0.03,
+          "sell_price": 100,
+          "withdraw_price": 100
+        },
+        {
+          "name": "Алмаз",
+          "image": "diamond.png",
+          "emoji": "💎",
+          "chance": 0.015,
+          "sell_price": 100,
+          "withdraw_price": 100
+        },
+        {
+          "name": "Пасхальное яйцо",
+          "image": "easter_egg.png",
+          "emoji": "🥚",
+          "chance": 0.005,
+          "sell_price": 125,
+          "withdraw_price": 125
+        },
+        {
+          "name": "Календарь",
+          "image": "calendar.png",
+          "emoji": "📅",
+          "chance": 0.02,
+          "sell_price": 87,
+          "withdraw_price": 87
+        }
+      ]
+    }
+  ]
+}

@@ -5,19 +5,21 @@ import requests
 import logging
 from datetime import datetime
 
-# Конфигурация
+# ===== КОНФИГУРАЦИЯ =====
 TOKEN = "8001659110:AAE4JyLTuX5s6zyj5F_CQoW5e-J-FGhosg4"
 CRYPTO_PAY_API = "https://pay.crypt.bot/api"
 CRYPTO_PAY_TOKEN = "421215:AAjdPiEHPnyscrlkUMEICJzkonZIZJDkXo9"
 STARS_RATE = 1.4  # 1 звезда = 1.4 рубля
 MIN_PAYMENT = 10  # Минимальное кол-во звезд
-WEBAPP_URL = "https://your-domain.com/index.html"  # url web_app
-# Инициализация
+WEBAPP_URL = "https://star-ruddy-three.vercel.app/"
+
+# ===== ИНИЦИАЛИЗАЦИЯ =====
 bot = Bot(token=TOKEN)
 dp = Dispatcher(bot)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# ===== БАЗА ДАННЫХ =====
 def init_db():
     with sqlite3.connect('users.db') as conn:
         cursor = conn.cursor()
@@ -43,53 +45,48 @@ def init_db():
         ''')
         conn.commit()
 
-@dp.message_handler(commands=['start'])
-async def start(message: types.Message):
+# ===== ОСНОВНЫЕ КОМАНДЫ =====
+@dp.message_handler(commands=['start', 'menu'])
+async def unified_start(message: types.Message):
     args = message.get_args()
 
-    if args and args.startswith('pay_'):
-        try:
+    if args:
+        if args.startswith('pay_'):
+            try:
+                _, user_id, stars = args.split('_')
+                stars = int(stars)
+                if stars < MIN_PAYMENT:
+                    await message.answer(f"❌ Минимум {MIN_PAYMENT} звезд")
+                    return
+                await process_payment(message, user_id, stars)
+            except Exception as e:
+                logger.error(f"Payment error: {e}")
+                await message.answer("❌ Ошибка обработки запроса")
+        elif args.startswith('success_'):
             _, user_id, stars = args.split('_')
-            stars = int(stars)
+            await message.answer(
+                f"✅ Баланс пополнен на {stars} ⭐\n"
+                f"Вернитесь в мини-приложение и нажмите 'Обновить'"
+            )
+    else:
+        keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
+        keyboard.add(types.KeyboardButton(
+            "🎰 Открыть мини-приложение",
+            web_app=types.WebAppInfo(url=WEBAPP_URL)
+        ))
 
-            if stars < MIN_PAYMENT:
-                await message.answer(f"❌ Минимум {MIN_PAYMENT} звезд")
-                return
-
-            await process_payment(message, user_id, stars)
-
-        except ValueError:
-            await message.answer("⚠️ Неверный формат команды")
-        except Exception as e:
-            logger.error(f"Ошибка в /start: {e}")
-            await message.answer("❌ Ошибка сервера")
-
-    elif args and args.startswith('success_'):
-        _, user_id, stars = args.split('_')
         await message.answer(
-            f"✅ Баланс пополнен на {stars} ⭐\n"
-            f"Вернитесь в мини-апп и нажмите 'Обновить'"
+            "🌟 Добро пожаловать в Star Azart! 🌟\n\n"
+            "Испытайте удачу в наших эксклюзивных кейсах!",
+            reply_markup=keyboard
         )
 
-@dp.message_handler(commands=['start', 'menu'])
-async def send_welcome(message: types.Message):
-    # Создаем кнопку для открытия мини-приложения
-    keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    button = types.KeyboardButton("Открыть мини-приложение", web_app=types.WebAppInfo(url=WEBAPP_URL))
-    keyboard.add(button)
-
-    await message.answer(
-        "Добро пожаловать в Star Azart! 🎰\n\n"
-        "Нажмите кнопку ниже, чтобы открыть мини-приложение:",
-        reply_markup=keyboard
-    )
-
+# ===== ОПЛАТА =====
 async def process_payment(message: types.Message, user_id: str, stars: int):
-    """Создание инвойса и обработка платежа"""
     amount_rub = round(stars * STARS_RATE, 2)
 
     try:
-        # 1. Регистрируем пользователя
+        # 1. Регистрация пользователя
         with sqlite3.connect('users.db') as conn:
             cursor = conn.cursor()
             cursor.execute('''
@@ -98,7 +95,7 @@ async def process_payment(message: types.Message, user_id: str, stars: int):
             ''', (user_id, message.from_user.username, message.from_user.first_name))
             conn.commit()
 
-        # 2. Создаем инвойс в CryptoPay
+        # 2. Создание инвойса
         headers = {"Crypto-Pay-API-Token": CRYPTO_PAY_TOKEN}
         payload = {
             "asset": "USDT",
@@ -117,7 +114,7 @@ async def process_payment(message: types.Message, user_id: str, stars: int):
         response.raise_for_status()
         invoice = response.json()['result']
 
-        # 3. Сохраняем платеж
+        # 3. Сохранение платежа
         with sqlite3.connect('users.db') as conn:
             cursor = conn.cursor()
             cursor.execute('''
@@ -126,10 +123,10 @@ async def process_payment(message: types.Message, user_id: str, stars: int):
             ''', (invoice['invoice_id'], user_id, stars, amount_rub, 'pending'))
             conn.commit()
 
-        # 4. Отправляем кнопку оплаты
+        # 4. Отправка кнопок оплаты
         kb = types.InlineKeyboardMarkup()
         kb.add(types.InlineKeyboardButton(
-            text="💳 Оплатить",
+            text="💳 Оплатить сейчас",
             url=invoice['pay_url']
         ))
         kb.add(types.InlineKeyboardButton(
@@ -138,27 +135,29 @@ async def process_payment(message: types.Message, user_id: str, stars: int):
         ))
 
         await message.answer(
-            f"*Счет на оплату*\n\n"
-            f"• Количество звезд: *{stars} ⭐*\n"
-            f"• Сумма: *{amount_rub} RUB*\n"
-            f"• Статус: ожидает оплаты",
+            f"💎 *Счет на оплату* 💎\n\n"
+            f"• Звезды: *{stars} ⭐*\n"
+            f"• Сумма: *{amount_rub} ₽*\n"
+            f"• Статус: ожидает оплаты\n\n"
+            f"Оплатите в течение 15 минут",
             parse_mode="Markdown",
             reply_markup=kb
         )
 
     except requests.exceptions.RequestException as e:
-        logger.error(f"Ошибка API CryptoPay: {e}")
-        await message.answer("⚠️ Ошибка платежной системы")
+        logger.error(f"CryptoPay API error: {e}")
+        await message.answer("⚠️ Ошибка соединения с платежной системой")
     except Exception as e:
-        logger.error(f"Ошибка process_payment: {e}")
-        await message.answer("❌ Ошибка создания платежа")
+        logger.error(f"Payment processing error: {e}")
+        await message.answer("❌ Не удалось создать платеж")
 
+# ===== ПРОВЕРКА ОПЛАТЫ =====
 @dp.callback_query_handler(lambda c: c.data.startswith('check_'))
 async def check_payment(callback: types.CallbackQuery):
     invoice_id = callback.data.split('_')[1]
 
     try:
-        # 1. Проверяем статус в CryptoPay
+        # 1. Проверка статуса
         headers = {"Crypto-Pay-API-Token": CRYPTO_PAY_TOKEN}
         response = requests.get(
             f"{CRYPTO_PAY_API}/getInvoices?invoice_ids={invoice_id}",
@@ -168,12 +167,10 @@ async def check_payment(callback: types.CallbackQuery):
         response.raise_for_status()
         invoice = response.json()['result']['items'][0]
 
-        # 2. Если оплачено - начисляем звезды
+        # 2. Если оплачено
         if invoice['status'] == 'paid':
             with sqlite3.connect('users.db') as conn:
                 cursor = conn.cursor()
-
-                # Получаем данные платежа
                 cursor.execute('''
                     SELECT user_id, stars FROM payments
                     WHERE invoice_id = ? AND status = 'pending'
@@ -182,14 +179,12 @@ async def check_payment(callback: types.CallbackQuery):
 
                 if payment:
                     user_id, stars = payment
-
-                    # Обновляем баланс
+                    # Обновление баланса
                     cursor.execute('''
                         UPDATE users SET stars = stars + ?
                         WHERE user_id = ?
                     ''', (stars, user_id))
-
-                    # Меняем статус платежа
+                    # Обновление статуса
                     cursor.execute('''
                         UPDATE payments SET status = 'paid'
                         WHERE invoice_id = ?
@@ -197,20 +192,22 @@ async def check_payment(callback: types.CallbackQuery):
                     conn.commit()
 
                     await callback.message.edit_text(
-                        f"✅ Оплата подтверждена!\n"
-                        f"Начислено: *{stars} ⭐*\n\n"
-                        f"Обновите мини-приложение",
+                        f"🎉 *Оплата подтверждена!*\n\n"
+                        f"На ваш счет зачислено: *{stars} ⭐*\n\n"
+                        f"Обновите мини-приложение для отображения баланса",
                         parse_mode="Markdown"
                     )
                 else:
                     await callback.answer("Платеж уже обработан", show_alert=True)
         else:
-            await callback.answer("Платеж не найден", show_alert=True)
+            await callback.answer("Платеж не найден или еще не обработан", show_alert=True)
 
     except Exception as e:
-        logger.error(f"Ошибка check_payment: {e}")
-        await callback.answer("⚠️ Ошибка проверки", show_alert=True)
+        logger.error(f"Payment check error: {e}")
+        await callback.answer("⚠️ Ошибка проверки платежа", show_alert=True)
 
+# ===== ЗАПУСК =====
 if __name__ == '__main__':
     init_db()
+    logger.info("Бот Star Azart запущен и готов к работе!")
     executor.start_polling(dp, skip_updates=True)

@@ -122,21 +122,31 @@ async def start(message: types.Message):
     username = message.from_user.username or message.from_user.first_name
 
     with sqlite3.connect('users.db') as conn:
+        # Создаем пользователя если не существует
         conn.execute('''
-            INSERT OR IGNORE INTO users (user_id, username, first_name, last_active)
-            VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+            INSERT OR IGNORE INTO users (user_id, username, first_name, last_active, stars)
+            VALUES (?, ?, ?, CURRENT_TIMESTAMP, 0)
         ''', (user_id, username, message.from_user.first_name))
         conn.commit()
 
         cursor = conn.cursor()
-        cursor.execute('SELECT stars FROM users WHERE user_id = ?', (user_id,))
-        stars = cursor.fetchone()[0] if cursor.fetchone() else 0
 
-        cursor.execute('SELECT item_name as name, item_image as image, sell_price FROM inventory WHERE user_id = ?', (user_id,))
+        # Получаем баланс (исправленная версия)
+        cursor.execute('SELECT stars FROM users WHERE user_id = ?', (user_id,))
+        user_data = cursor.fetchone()
+        stars = user_data[0] if user_data else 0
+
+        # Получаем инвентарь
+        cursor.execute('''
+            SELECT item_name as name, item_image as image, sell_price
+            FROM inventory WHERE user_id = ?
+        ''', (user_id,))
         inventory = cursor.fetchall()
 
+    # Формируем URL веб-приложения
     webapp_url = f"https://star-ruddy-three.vercel.app/?user_id={user_id}&stars={stars}&inventory={json.dumps([dict(item) for item in inventory])}"
 
+    # Создаем клавиатуру с WebApp кнопкой
     keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
     keyboard.add(types.KeyboardButton(
         "🎰 Открыть мини-приложение",

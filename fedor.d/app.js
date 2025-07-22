@@ -13,50 +13,54 @@ document.addEventListener('DOMContentLoaded', () => {
     let inventory = [];
 
     try {
-        inventory = JSON.parse(params.get('inventory') || [];
+        inventory = JSON.parse(params.get('inventory') || '[]');
     } catch (e) {
         console.error('Ошибка парсинга инвентаря:', e);
         inventory = [];
     }
 
-    // 2. Устанавливаем данные в интерфейс
-    document.getElementById('user-name').textContent = username;
-    document.getElementById('stars').textContent = stars;
+    // 2. Устанавливаем начальное состояние
+    const state = {
+        balance: parseInt(stars) || 0,
+        inventory: inventory,
+        loading: false
+    };
 
-    // 3. Рендерим инвентарь
-    const renderInventory = () => {
+    // 3. Обновляем интерфейс
+    function updateUI() {
+        document.getElementById('user-name').textContent = username;
+        document.getElementById('stars').textContent = state.balance;
+        renderInventory();
+    }
+
+    // 4. Рендерим инвентарь
+    function renderInventory() {
         const container = document.getElementById('inventory-items');
-        if (inventory.length > 0) {
-            container.innerHTML = inventory.map(item => `
+        container.innerHTML = state.inventory.length > 0
+            ? state.inventory.map(item => `
                 <div class="item-card">
                     <div class="item-emoji">${item.emoji || '🎁'}</div>
                     <div class="item-name">${item.name}</div>
                     <div class="item-price">${item.sell_price} ⭐</div>
-                    <div class="item-buttons">
-                        <button class="sell-btn">💰</button>
-                        <button class="withdraw-btn">📤</button>
-                    </div>
                 </div>
-            `).join('');
-        } else {
-            container.innerHTML = '<div class="empty-message">Инвентарь пуст</div>';
-        }
-    };
+            `).join('')
+            : '<div class="empty-message">Инвентарь пуст</div>';
+    }
 
-    // 4. Функция открытия кейса
-    const openCase = (caseType) => {
-        if (tg) {
-            tg.sendData(JSON.stringify({
-                action: 'open_case',
-                case_type: caseType,
-                user_id: userId
-            }));
-        } else {
-            alert('Функция доступна только в Telegram');
-        }
-    };
+    // 5. Функция открытия кейса (упрощенная версия)
+    function openCase(caseType) {
+        if (state.loading) return;
+        alert(`Открытие кейса ${caseType} будет доступно после настройки бота`);
+    }
 
-    // 5. Обработчики событий
+    // 6. Показываем основной интерфейс
+    function showMainInterface() {
+        document.getElementById('welcome-screen').style.display = 'none';
+        document.getElementById('app-interface').style.display = 'flex';
+        updateUI();
+    }
+
+    // 7. Обработчики событий
     document.getElementById('add-stars').addEventListener('click', () => {
         if (tg) {
             tg.openTelegramLink(`https://t.me/StarAzart_bot?start=pay_${userId}_100`);
@@ -66,18 +70,18 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     document.querySelectorAll('.case-card').forEach(card => {
-        card.addEventListener('click', () => {
-            const caseType = card.dataset.case;
-            openCase(caseType);
-        });
+        card.addEventListener('click', () => openCase(card.dataset.case));
     });
 
-    // 6. Инициализация интерфейса
-    renderInventory();
-
-    // 7. Скрываем загрузчик и показываем основной интерфейс
+    // 8. Инициализация приложения
     setTimeout(() => {
-        document.getElementById('welcome-screen').style.display = 'none';
-        document.getElementById('app-interface').style.display = 'flex';
+        showMainInterface();
+
+        // Для отладки
+        console.log('App initialized with:', {
+            userId: userId,
+            balance: state.balance,
+            inventory: state.inventory
+        });
     }, 1000);
 });

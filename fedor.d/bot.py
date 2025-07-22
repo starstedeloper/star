@@ -6,9 +6,9 @@ import logging
 from datetime import datetime
 
 # Конфигурация
-TOKEN = "YOUR_BOT_TOKEN"
+TOKEN = "8001659110:AAE4JyLTuX5s6zyj5F_CQoW5e-J-FGhosg4"
 CRYPTO_PAY_API = "https://pay.crypt.bot/api"
-CRYPTO_PAY_TOKEN = "YOUR_CRYPTO_PAY_TOKEN"
+CRYPTO_PAY_TOKEN = "421215:AAjdPiEHPnyscrlkUMEICJzkonZIZJDkXo9"
 STARS_RATE = 1.4
 MIN_PAYMENT = 10
 WEBAPP_URL = "https://your-webapp-url.vercel.app/"
@@ -18,10 +18,10 @@ bot = Bot(token=TOKEN)
 dp = Dispatcher(bot)
 logging.basicConfig(level=logging.INFO)
 
-# Инициализация БД
 def init_db():
     with sqlite3.connect('users.db') as conn:
         cursor = conn.cursor()
+
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS users (
                 user_id INTEGER PRIMARY KEY,
@@ -31,16 +31,19 @@ def init_db():
                 last_active TIMESTAMP
             )
         ''')
+
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS payments (
                 invoice_id TEXT PRIMARY KEY,
                 user_id INTEGER,
                 stars INTEGER,
                 amount_rub REAL,
-                status TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                status TEXT CHECK(status IN ('pending', 'paid', 'expired')),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(user_id) REFERENCES users(user_id)
             )
         ''')
+
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS inventory (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -51,7 +54,9 @@ def init_db():
                 withdraw_price INTEGER,
                 obtained_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY(user_id) REFERENCES users(user_id)
+            )
         ''')
+
         conn.commit()
 
 # Команда /start

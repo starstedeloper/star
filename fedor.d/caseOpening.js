@@ -1,4 +1,3 @@
-// caseOpening.js
 class CaseOpening {
   constructor(config) {
     this.caseConfig = config;
@@ -27,7 +26,6 @@ class CaseOpening {
     const selectedCase = this.caseConfig.cases.find(c => c.type === caseType);
     if (!selectedCase) return;
 
-    // Здесь будет логика анимации открытия кейса
     const wonItem = this.getRandomItem(selectedCase.items);
     this.showWonItem(wonItem);
   }
@@ -43,7 +41,7 @@ class CaseOpening {
       }
     }
 
-    return items[0]; // fallback
+    return items[0];
   }
 
   showWonItem(item) {
@@ -75,12 +73,10 @@ class CaseOpening {
   }
 
   sellItem(item) {
-    // Логика продажи предмета
     console.log(`Продано: ${item.name} за ${item.sell_price} ⭐`);
   }
 
   withdrawItem(item) {
-    // Логика вывода предмета
     console.log(`Заявка на вывод: ${item.name}`);
   }
 }

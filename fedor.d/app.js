@@ -2,40 +2,20 @@ document.addEventListener('DOMContentLoaded', async () => {
     const tg = window.Telegram?.WebApp;
     tg?.expand();
 
-    // Получение данных пользователя
-    const user = tg?.initDataUnsafe?.user || {};
-    const userId = user.id?.toString() || '0';
-    const username = user.username || user.first_name || 'Гость';
+    // Получаем данные пользователя из URL или WebApp
+    const params = new URLSearchParams(window.location.search);
+    const userId = params.get('user_id') || tg?.initDataUnsafe?.user?.id || '0';
+    const username = tg?.initDataUnsafe?.user?.first_name || 'Гость';
 
     // Инициализация интерфейса
     document.getElementById('user-name').textContent = username;
 
     // Состояние приложения
     const state = {
-        balance: 0,
-        inventory: [],
+        balance: parseInt(params.get('stars')) || 0,
+        inventory: JSON.parse(params.get('inventory') || '[]'),
         loading: false
     };
-
-    // Загрузка данных
-    async function loadUserData() {
-        try {
-            state.loading = true;
-            const response = await fetch(`/api/user?user_id=${userId}`);
-
-            if (response.ok) {
-                const data = await response.json();
-                state.balance = data.balance || 0;
-                state.inventory = data.inventory || [];
-                updateUI();
-            }
-        } catch (error) {
-            console.error('Ошибка загрузки:', error);
-        } finally {
-            state.loading = false;
-            hideLoader();
-        }
-    }
 
     // Обновление интерфейса
     function updateUI() {
@@ -49,9 +29,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         container.innerHTML = state.inventory.length > 0
             ? state.inventory.map(item => `
                 <div class="item-card">
-                    <img src="images/items/${item.image}" alt="${item.name}">
+                    <div class="item-emoji">${item.emoji || '🎁'}</div>
                     <div class="item-name">${item.name}</div>
                     <div class="item-price">${item.sell_price} ⭐</div>
+                    <div class="item-buttons">
+                        <button class="sell-btn" data-id="${item.id}">💰</button>
+                        <button class="withdraw-btn" data-id="${item.id}">📤</button>
+                    </div>
                 </div>
             `).join('')
             : '<div class="empty-message">Инвентарь пуст</div>';
@@ -63,54 +47,27 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         try {
             state.loading = true;
-            const response = await fetch('/api/open-case', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
-                    user_id: userId,
-                    case_type: caseType
-                })
-            });
 
-            if (response.ok) {
-                const result = await response.json();
-                state.balance = result.new_balance;
-                state.inventory.push(result.item);
-                updateUI();
-                showWonItem(result.item);
+            if (state.balance < 10) {  // Пример цены кейса
+                alert('Недостаточно звезд!');
+                return;
+            }
+
+            // Отправляем данные боту через WebApp
+            if (tg) {
+                tg.sendData(JSON.stringify({
+                    action: 'open_case',
+                    case_type: caseType,
+                    user_id: userId
+                }));
+            } else {
+                alert('Действие доступно только в Telegram');
             }
         } catch (error) {
             console.error('Ошибка:', error);
         } finally {
             state.loading = false;
         }
-    }
-
-    // Показ выигранного предмета
-    function showWonItem(item) {
-        const html = `
-            <div class="won-item">
-                <h3>🎉 Вы выиграли!</h3>
-                <img src="images/items/${item.image}" alt="${item.name}">
-                <div class="item-name">${item.name}</div>
-                <div class="item-price">${item.sell_price} ⭐</div>
-            </div>
-        `;
-
-        const container = document.createElement('div');
-        container.className = 'item-popup';
-        container.innerHTML = html;
-        document.body.appendChild(container);
-
-        setTimeout(() => container.remove(), 3000);
-    }
-
-    // Инициализация
-    function hideLoader() {
-        const loader = document.getElementById('welcome-screen');
-        const app = document.getElementById('app-interface');
-        if (loader) loader.style.display = 'none';
-        if (app) app.style.display = 'flex';
     }
 
     // Обработчики событий
@@ -126,6 +83,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         card.addEventListener('click', () => openCase(card.dataset.case));
     });
 
-    // Запуск
-    loadUserData();
+    // Инициализация
+    updateUI();
 });

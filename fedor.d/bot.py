@@ -4,6 +4,7 @@ import sqlite3
 import json
 import logging
 import requests
+import asyncio
 from datetime import datetime
 
 # Конфигурация
@@ -12,7 +13,7 @@ WEBAPP_URL = "https://your-webapp-url.vercel.app/"
 CRYPTO_PAY_TOKEN = "421215:AAjdPiEHPnyscrlkUMEICJzkonZIZJDkXo9"
 CRYPTO_PAY_API = "https://pay.crypt.bot/api"
 STARS_RATE = 1.4
-MIN_PAYMENT = 10  # Минимальная сумма пополнения в звездах
+MIN_PAYMENT = 10
 
 # Инициализация
 bot = Bot(token=TOKEN)
@@ -43,6 +44,7 @@ def init_db():
                 withdraw_price INTEGER,
                 obtained_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY(user_id) REFERENCES users(user_id)
+            )
         ''')
 
         cursor.execute('''
@@ -181,7 +183,7 @@ async def handle_web_app_data(message: types.Message):
         user_id = message.from_user.id
 
         if data['action'] == 'open_case':
-            case_price = 10  # Пример цены кейса
+            case_price = 10
 
             with sqlite3.connect('users.db') as conn:
                 cursor = conn.cursor()
@@ -192,11 +194,9 @@ async def handle_web_app_data(message: types.Message):
                     await message.answer("❌ Недостаточно звезд для открытия кейса!")
                     return
 
-                # Обновляем баланс
                 conn.execute('UPDATE users SET stars = stars - ? WHERE user_id = ?',
                             (case_price, user_id))
 
-                # Добавляем случайный предмет
                 conn.execute('''
                     INSERT INTO inventory (user_id, item_name, item_image, sell_price)
                     VALUES (?, ?, ?, ?)
@@ -204,7 +204,6 @@ async def handle_web_app_data(message: types.Message):
 
                 conn.commit()
 
-            # Отправляем обновленные данные
             user_data = await get_user_data(user_id)
             webapp_url = f"{WEBAPP_URL}?user_id={user_id}&stars={user_data['balance']}&inventory={json.dumps(user_data['inventory'])}"
 
@@ -214,6 +213,7 @@ async def handle_web_app_data(message: types.Message):
                     types.KeyboardButton(
                         "🔄 Обновить приложение",
                         web_app=types.WebAppInfo(url=webapp_url)
+                    )
                 )
             )
 
@@ -242,14 +242,12 @@ async def check_payments():
                         invoice = response.json().get('result', {}).get('items', [{}])[0]
 
                         if invoice.get('status') == 'paid':
-                            # Начисляем звезды
                             conn.execute('''
                                 UPDATE users
                                 SET stars = stars + ?
                                 WHERE user_id = ?
                             ''', (payment['stars'], payment['user_id']))
 
-                            # Обновляем статус платежа
                             conn.execute('''
                                 UPDATE payments
                                 SET status = 'paid'
@@ -258,7 +256,6 @@ async def check_payments():
 
                             conn.commit()
 
-                            # Уведомляем пользователя
                             await bot.send_message(
                                 payment['user_id'],
                                 f"✅ Ваш баланс пополнен на {payment['stars']} ⭐"
@@ -267,14 +264,10 @@ async def check_payments():
         except Exception as e:
             logging.error(f"Payment check error: {e}")
 
-        await asyncio.sleep(60)  # Проверяем каждую минуту
+        await asyncio.sleep(60)
 
 if __name__ == '__main__':
     init_db()
-
-    # Запускаем проверку платежей в фоне
-    import asyncio
     loop = asyncio.get_event_loop()
     loop.create_task(check_payments())
-
     executor.start_polling(dp, skip_updates=True)

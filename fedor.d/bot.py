@@ -35,16 +35,15 @@ def init_db():
         ''')
 
         cursor.execute('''
-            CREATE TABLE IF NOT EXISTS inventory (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER,
-                item_name TEXT,
-                item_image TEXT,
-                sell_price INTEGER,
-                withdraw_price INTEGER,
-                obtained_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY(user_id) REFERENCES users(user_id)
-            )
+                    CREATE TABLE IF NOT EXISTS inventory (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        user_id INTEGER NOT NULL,
+                        item_name TEXT NOT NULL,
+                        item_image TEXT,
+                        sell_price INTEGER,
+                        obtained_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY(user_id) REFERENCES users(user_id) ON DELETE CASCADE
+                    )
         ''')
 
         cursor.execute('''
@@ -116,37 +115,50 @@ async def create_crypto_invoice(user_id, stars, amount_usd):
         logging.error(f"Payment error: {e}")
         return None
 
-@dp.message_handler(commands=['start', 'menu'])
+@dp.message_handler(commands=['start'])
 async def start(message: types.Message):
     user_id = message.from_user.id
     username = message.from_user.username or message.from_user.first_name
 
     with sqlite3.connect('users.db') as conn:
-        # Создаем пользователя если не существует
+        # 1. Создаем/обновляем пользователя
         conn.execute('''
-            INSERT OR IGNORE INTO users (user_id, username, first_name, last_active, stars)
-            VALUES (?, ?, ?, CURRENT_TIMESTAMP, 0)
-        ''', (user_id, username, message.from_user.first_name))
-        conn.commit()
+            INSERT OR REPLACE INTO users
+            (user_id, username, first_name, last_active, stars)
+            VALUES (?, ?, ?, CURRENT_TIMESTAMP, COALESCE((SELECT stars FROM users WHERE user_id = ?), 0))
+        ''', (user_id, username, message.from_user.first_name, user_id))
 
-        cursor = conn.cursor()
+        # 2. Создаем стартовый инвентарь (если не существует)
+        cursor = conn.execute('SELECT 1 FROM inventory WHERE user_id = ? LIMIT 1', (user_id,))
+        if not cursor.fetchone():
+            conn.execute('''
+                INSERT INTO inventory
+                (user_id, item_name, item_image, sell_price)
+                VALUES (?, 'Стартовый набор', 'starter.png', 10)
+            ''', (user_id,))
 
-        # Получаем баланс (исправленная версия)
-        cursor.execute('SELECT stars FROM users WHERE user_id = ?', (user_id,))
-        user_data = cursor.fetchone()
-        stars = user_data[0] if user_data else 0
+        # 3. Получаем данные для веб-приложения
+        cursor = conn.execute('SELECT stars FROM users WHERE user_id = ?', (user_id,))
+        stars = cursor.fetchone()[0]
 
-        # Получаем инвентарь
-        cursor.execute('''
+        cursor = conn.execute('''
             SELECT item_name as name, item_image as image, sell_price
             FROM inventory WHERE user_id = ?
         ''', (user_id,))
         inventory = cursor.fetchall()
 
-    # Формируем URL веб-приложения
-    webapp_url = f"https://star-ruddy-three.vercel.app/?user_id={user_id}&stars={stars}&inventory={json.dumps([dict(item) for item in inventory])}"
+        conn.commit()
 
-    # Создаем клавиатуру с WebApp кнопкой
+    # 4. Формируем URL с ВСЕМИ параметрами
+    webapp_url = (
+        f"https://star-ruddy-three.vercel.app/"
+        f"?user_id={user_id}"
+        f"&stars={stars}"
+        f"&inventory={json.dumps([dict(item) for item in inventory])}"
+        f"&username={username}"
+    )
+
+    # 5. Отправляем сообщение с кнопкой
     keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
     keyboard.add(types.KeyboardButton(
         "🎰 Открыть мини-приложение",

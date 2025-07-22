@@ -3,12 +3,16 @@ from aiogram.utils import executor
 import sqlite3
 import json
 import logging
+import requests
 from datetime import datetime
 
 # Конфигурация
 TOKEN = "8001659110:AAE4JyLTuX5s6zyj5F_CQoW5e-J-FGhosg4"
 WEBAPP_URL = "https://your-webapp-url.vercel.app/"
+CRYPTO_PAY_TOKEN = "421215:AAjdPiEHPnyscrlkUMEICJzkonZIZJDkXo9"
+CRYPTO_PAY_API = "https://pay.crypt.bot/api"
 STARS_RATE = 1.4
+MIN_PAYMENT = 10  # Минимальная сумма пополнения в звездах
 
 # Инициализация
 bot = Bot(token=TOKEN)
@@ -18,6 +22,7 @@ logging.basicConfig(level=logging.INFO)
 def init_db():
     with sqlite3.connect('users.db') as conn:
         cursor = conn.cursor()
+
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS users (
                 user_id INTEGER PRIMARY KEY,
@@ -27,6 +32,7 @@ def init_db():
                 last_active TIMESTAMP
             )
         ''')
+
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS inventory (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -38,6 +44,19 @@ def init_db():
                 obtained_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY(user_id) REFERENCES users(user_id)
         ''')
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS payments (
+                invoice_id TEXT PRIMARY KEY,
+                user_id INTEGER,
+                stars INTEGER,
+                amount_usd REAL,
+                status TEXT CHECK(status IN ('pending', 'paid', 'expired')),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(user_id) REFERENCES users(user_id)
+            )
+        ''')
+
         conn.commit()
 
 async def get_user_data(user_id):
@@ -58,6 +77,42 @@ async def get_user_data(user_id):
             'balance': user['stars'] if user else 0,
             'inventory': [dict(item) for item in inventory]
         }
+
+async def create_crypto_invoice(user_id, stars, amount_usd):
+    try:
+        headers = {"Crypto-Pay-API-Token": CRYPTO_PAY_TOKEN}
+        payload = {
+            "asset": "USDT",
+            "amount": str(amount_usd),
+            "description": f"Пополнение {stars} звезд",
+            "paid_btn_url": f"{WEBAPP_URL}?payment_success={user_id}_{stars}",
+            "payload": json.dumps({"user_id": user_id, "stars": stars})
+        }
+
+        response = requests.post(
+            f"{CRYPTO_PAY_API}/createInvoice",
+            headers=headers,
+            json=payload
+        )
+
+        if response.status_code == 200:
+            result = response.json().get('result')
+
+            with sqlite3.connect('users.db') as conn:
+                conn.execute('''
+                    INSERT INTO payments (invoice_id, user_id, stars, amount_usd, status)
+                    VALUES (?, ?, ?, ?, ?)
+                ''', (result['invoice_id'], user_id, stars, amount_usd, 'pending'))
+                conn.commit()
+
+            return result
+        else:
+            logging.error(f"Crypto Pay error: {response.text}")
+            return None
+
+    except Exception as e:
+        logging.error(f"Payment error: {e}")
+        return None
 
 @dp.message_handler(commands=['start', 'menu'])
 async def start(message: types.Message):
@@ -86,6 +141,39 @@ async def start(message: types.Message):
         reply_markup=keyboard
     )
 
+@dp.message_handler(commands=['pay'])
+async def handle_payment(message: types.Message):
+    try:
+        user_id = message.from_user.id
+        args = message.get_args().split('_')
+
+        if len(args) >= 3 and args[0] == 'pay':
+            stars = int(args[2])
+            amount_usd = stars * STARS_RATE
+
+            invoice = await create_crypto_invoice(user_id, stars, amount_usd)
+
+            if invoice:
+                kb = types.InlineKeyboardMarkup()
+                kb.add(types.InlineKeyboardButton(
+                    text="💳 Оплатить сейчас",
+                    url=invoice['pay_url']
+                ))
+
+                await message.answer(
+                    f"💎 Счет на {stars} ⭐ ({amount_usd:.2f} USDT)\n\n"
+                    f"Ссылка для оплаты действительна 15 минут",
+                    reply_markup=kb
+                )
+            else:
+                await message.answer("❌ Не удалось создать счет, попробуйте позже")
+        else:
+            await message.answer("Используйте команду в формате: /pay_100 (где 100 - количество звезд)")
+
+    except Exception as e:
+        logging.error(f"Payment command error: {e}")
+        await message.answer("❌ Произошла ошибка, попробуйте позже")
+
 @dp.message_handler(content_types=['web_app_data'])
 async def handle_web_app_data(message: types.Message):
     try:
@@ -94,11 +182,21 @@ async def handle_web_app_data(message: types.Message):
 
         if data['action'] == 'open_case':
             case_price = 10  # Пример цены кейса
+
             with sqlite3.connect('users.db') as conn:
+                cursor = conn.cursor()
+                cursor.execute('SELECT stars FROM users WHERE user_id = ?', (user_id,))
+                user = cursor.fetchone()
+
+                if not user or user['stars'] < case_price:
+                    await message.answer("❌ Недостаточно звезд для открытия кейса!")
+                    return
+
+                # Обновляем баланс
                 conn.execute('UPDATE users SET stars = stars - ? WHERE user_id = ?',
                             (case_price, user_id))
 
-                # Добавляем случайный предмет в инвентарь
+                # Добавляем случайный предмет
                 conn.execute('''
                     INSERT INTO inventory (user_id, item_name, item_image, sell_price)
                     VALUES (?, ?, ?, ?)
@@ -111,19 +209,72 @@ async def handle_web_app_data(message: types.Message):
             webapp_url = f"{WEBAPP_URL}?user_id={user_id}&stars={user_data['balance']}&inventory={json.dumps(user_data['inventory'])}"
 
             await message.answer(
-                "Кейс успешно открыт!",
+                "🎉 Кейс успешно открыт!",
                 reply_markup=types.ReplyKeyboardMarkup(resize_keyboard=True).add(
                     types.KeyboardButton(
                         "🔄 Обновить приложение",
                         web_app=types.WebAppInfo(url=webapp_url)
-                    )
                 )
             )
 
     except Exception as e:
         logging.error(f"WebApp error: {e}")
-        await message.answer("Произошла ошибка, попробуйте позже")
+        await message.answer("❌ Произошла ошибка, попробуйте позже")
+
+async def check_payments():
+    while True:
+        try:
+            with sqlite3.connect('users.db') as conn:
+                cursor = conn.cursor()
+                cursor.execute('SELECT * FROM payments WHERE status = "pending"')
+                pending_payments = cursor.fetchall()
+
+                headers = {"Crypto-Pay-API-Token": CRYPTO_PAY_TOKEN}
+
+                for payment in pending_payments:
+                    invoice_id = payment['invoice_id']
+                    response = requests.get(
+                        f"{CRYPTO_PAY_API}/getInvoices?invoice_ids={invoice_id}",
+                        headers=headers
+                    )
+
+                    if response.status_code == 200:
+                        invoice = response.json().get('result', {}).get('items', [{}])[0]
+
+                        if invoice.get('status') == 'paid':
+                            # Начисляем звезды
+                            conn.execute('''
+                                UPDATE users
+                                SET stars = stars + ?
+                                WHERE user_id = ?
+                            ''', (payment['stars'], payment['user_id']))
+
+                            # Обновляем статус платежа
+                            conn.execute('''
+                                UPDATE payments
+                                SET status = 'paid'
+                                WHERE invoice_id = ?
+                            ''', (invoice_id,))
+
+                            conn.commit()
+
+                            # Уведомляем пользователя
+                            await bot.send_message(
+                                payment['user_id'],
+                                f"✅ Ваш баланс пополнен на {payment['stars']} ⭐"
+                            )
+
+        except Exception as e:
+            logging.error(f"Payment check error: {e}")
+
+        await asyncio.sleep(60)  # Проверяем каждую минуту
 
 if __name__ == '__main__':
     init_db()
+
+    # Запускаем проверку платежей в фоне
+    import asyncio
+    loop = asyncio.get_event_loop()
+    loop.create_task(check_payments())
+
     executor.start_polling(dp, skip_updates=True)

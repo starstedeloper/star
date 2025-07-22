@@ -9,7 +9,7 @@ from datetime import datetime
 
 # Конфигурация
 TOKEN = "8001659110:AAE4JyLTuX5s6zyj5F_CQoW5e-J-FGhosg4"
-WEBAPP_URL = "https://your-webapp-url.vercel.app/"
+WEBAPP_URL = "https://star-ruddy-three.vercel.app/"
 CRYPTO_PAY_TOKEN = "421215:AAjdPiEHPnyscrlkUMEICJzkonZIZJDkXo9"
 CRYPTO_PAY_API = "https://pay.crypt.bot/api"
 STARS_RATE = 1.4
@@ -128,8 +128,14 @@ async def start(message: types.Message):
         ''', (user_id, username, message.from_user.first_name))
         conn.commit()
 
-    user_data = await get_user_data(user_id)
-    webapp_url = f"{WEBAPP_URL}?user_id={user_id}&stars={user_data['balance']}&inventory={json.dumps(user_data['inventory'])}"
+        cursor = conn.cursor()
+        cursor.execute('SELECT stars FROM users WHERE user_id = ?', (user_id,))
+        stars = cursor.fetchone()[0] if cursor.fetchone() else 0
+
+        cursor.execute('SELECT item_name as name, item_image as image, sell_price FROM inventory WHERE user_id = ?', (user_id,))
+        inventory = cursor.fetchall()
+
+    webapp_url = f"https://star-ruddy-three.vercel.app/?user_id={user_id}&stars={stars}&inventory={json.dumps([dict(item) for item in inventory])}"
 
     keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
     keyboard.add(types.KeyboardButton(
@@ -138,8 +144,7 @@ async def start(message: types.Message):
     ))
 
     await message.answer(
-        "🌟 Добро пожаловать в Star Azart!\n\n"
-        "Испытайте удачу в наших эксклюзивных кейсах!",
+        "🌟 Добро пожаловать в Star Azart!",
         reply_markup=keyboard
     )
 

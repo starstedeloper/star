@@ -1,76 +1,62 @@
-document.addEventListener('DOMContentLoaded', async () => {
+document.addEventListener('DOMContentLoaded', () => {
     const tg = window.Telegram?.WebApp;
-    tg?.expand();
-
-    // Получаем данные пользователя из URL или WebApp
-    const params = new URLSearchParams(window.location.search);
-    const userId = params.get('user_id') || tg?.initDataUnsafe?.user?.id || '0';
-    const username = tg?.initDataUnsafe?.user?.first_name || 'Гость';
-
-    // Инициализация интерфейса
-    document.getElementById('user-name').textContent = username;
-
-    // Состояние приложения
-    const state = {
-        balance: parseInt(params.get('stars')) || 0,
-        inventory: JSON.parse(params.get('inventory') || '[]'),
-        loading: false
-    };
-
-    // Обновление интерфейса
-    function updateUI() {
-        document.getElementById('stars').textContent = state.balance;
-        renderInventory();
+    if (tg) {
+        tg.expand();
+        tg.enableClosingConfirmation();
     }
 
-    // Рендер инвентаря
-    function renderInventory() {
+    // 1. Получаем данные из URL параметров
+    const params = new URLSearchParams(window.location.search);
+    const userId = params.get('user_id') || (tg?.initDataUnsafe?.user?.id || '0');
+    const username = tg?.initDataUnsafe?.user?.first_name || 'Гость';
+    const stars = params.get('stars') || '0';
+    let inventory = [];
+
+    try {
+        inventory = JSON.parse(params.get('inventory') || [];
+    } catch (e) {
+        console.error('Ошибка парсинга инвентаря:', e);
+        inventory = [];
+    }
+
+    // 2. Устанавливаем данные в интерфейс
+    document.getElementById('user-name').textContent = username;
+    document.getElementById('stars').textContent = stars;
+
+    // 3. Рендерим инвентарь
+    const renderInventory = () => {
         const container = document.getElementById('inventory-items');
-        container.innerHTML = state.inventory.length > 0
-            ? state.inventory.map(item => `
+        if (inventory.length > 0) {
+            container.innerHTML = inventory.map(item => `
                 <div class="item-card">
                     <div class="item-emoji">${item.emoji || '🎁'}</div>
                     <div class="item-name">${item.name}</div>
                     <div class="item-price">${item.sell_price} ⭐</div>
                     <div class="item-buttons">
-                        <button class="sell-btn" data-id="${item.id}">💰</button>
-                        <button class="withdraw-btn" data-id="${item.id}">📤</button>
+                        <button class="sell-btn">💰</button>
+                        <button class="withdraw-btn">📤</button>
                     </div>
                 </div>
-            `).join('')
-            : '<div class="empty-message">Инвентарь пуст</div>';
-    }
-
-    // Открытие кейса
-    async function openCase(caseType) {
-        if (state.loading) return;
-
-        try {
-            state.loading = true;
-
-            if (state.balance < 10) {  // Пример цены кейса
-                alert('Недостаточно звезд!');
-                return;
-            }
-
-            // Отправляем данные боту через WebApp
-            if (tg) {
-                tg.sendData(JSON.stringify({
-                    action: 'open_case',
-                    case_type: caseType,
-                    user_id: userId
-                }));
-            } else {
-                alert('Действие доступно только в Telegram');
-            }
-        } catch (error) {
-            console.error('Ошибка:', error);
-        } finally {
-            state.loading = false;
+            `).join('');
+        } else {
+            container.innerHTML = '<div class="empty-message">Инвентарь пуст</div>';
         }
-    }
+    };
 
-    // Обработчики событий
+    // 4. Функция открытия кейса
+    const openCase = (caseType) => {
+        if (tg) {
+            tg.sendData(JSON.stringify({
+                action: 'open_case',
+                case_type: caseType,
+                user_id: userId
+            }));
+        } else {
+            alert('Функция доступна только в Telegram');
+        }
+    };
+
+    // 5. Обработчики событий
     document.getElementById('add-stars').addEventListener('click', () => {
         if (tg) {
             tg.openTelegramLink(`https://t.me/StarAzart_bot?start=pay_${userId}_100`);
@@ -80,9 +66,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 
     document.querySelectorAll('.case-card').forEach(card => {
-        card.addEventListener('click', () => openCase(card.dataset.case));
+        card.addEventListener('click', () => {
+            const caseType = card.dataset.case;
+            openCase(caseType);
+        });
     });
 
-    // Инициализация
-    updateUI();
+    // 6. Инициализация интерфейса
+    renderInventory();
+
+    // 7. Скрываем загрузчик и показываем основной интерфейс
+    setTimeout(() => {
+        document.getElementById('welcome-screen').style.display = 'none';
+        document.getElementById('app-interface').style.display = 'flex';
+    }, 1000);
 });

@@ -31,16 +31,30 @@ document.addEventListener('DOMContentLoaded', () => {
     async function initApp() {
         try {
             const params = new URLSearchParams(window.location.search);
-
             state.userId = params.get('user_id') || (tg?.initDataUnsafe?.user?.id || '0');
-            state.username = params.get('username') || tg?.initDataUnsafe?.user?.first_name || 'Гость';
-            state.balance = parseInt(params.get('stars') || '0');
+            state.username = tg?.initDataUnsafe?.user?.first_name || 'Гость';
 
-            try {
-                state.inventory = JSON.parse(params.get('inventory') || '[]');
-            } catch (e) {
-                console.error('Ошибка парсинга инвентаря:', e);
-                state.inventory = [];
+            // Если есть ID пользователя и это Telegram, запрашиваем его данные
+            if (state.userId !== '0' && tg) {
+                // В новой версии предполагается, что бот передает данные в URL при открытии,
+                // поэтому прямого запроса fetchUserData() при инициализации может не быть.
+                // Данные берутся из параметров, которые бот подставляет.
+                state.balance = parseInt(params.get('stars') || '0');
+                 try {
+                    state.inventory = JSON.parse(params.get('inventory') || '[]');
+                } catch (e) {
+                    console.error('Ошибка парсинга инвентаря:', e);
+                    state.inventory = [];
+                }
+            } else {
+                // Режим отладки: если нет ID или это не Telegram, используем данные из URL
+                state.balance = parseInt(params.get('stars') || '0');
+                try {
+                    state.inventory = JSON.parse(params.get('inventory') || '[]');
+                } catch (e) {
+                    console.error('Ошибка парсинга инвентаря из URL:', e);
+                    state.inventory = [];
+                }
             }
 
             updateUI();
@@ -50,7 +64,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         } catch (error) {
             console.error('Initialization error:', error);
-            showMainInterface();
+            showMainInterface(); // Показываем интерфейс даже в случае ошибки
         }
     }
 
@@ -84,7 +98,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // --- ИЗМЕНЕНИЕ ЗДЕСЬ ---
     // Эта функция исправлена, чтобы переопределять стили !important из CSS
     function showMainInterface() {
         // Убираем экран загрузки. Используем setProperty, чтобы переопределить '!important'
@@ -92,7 +105,6 @@ document.addEventListener('DOMContentLoaded', () => {
         // Показываем главный интерфейс. Используем setProperty, чтобы переопределить '!important'
         elements.appInterface.style.setProperty('display', 'flex', 'important');
     }
-    // --- КОНЕЦ ИЗМЕНЕНИЯ ---
 
     async function sellItem(itemName) {
         if (state.loading) return;
@@ -102,9 +114,14 @@ document.addEventListener('DOMContentLoaded', () => {
             const item = state.inventory.find(i => i.name === itemName);
             if (!item) return;
 
+            // Вместо alert лучше использовать tg.sendData для синхронизации с ботом
+            if (tg) {
+                 tg.sendData(JSON.stringify({ action: 'sell_item', itemName: itemName }));
+            }
+            
             alert(`Предмет "${item.name}" продан за ${item.sell_price} ⭐`);
 
-            //  состояние
+            // Оптимистичное обновление интерфейса
             state.balance += item.sell_price;
             state.inventory = state.inventory.filter(i => i.name !== itemName);
             updateUI();
@@ -116,6 +133,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function withdrawItem(itemName) {
         if (state.loading) return;
+        // Отправляем данные боту
+         if (tg) {
+            tg.sendData(JSON.stringify({ action: 'withdraw_item', itemName: itemName }));
+        }
         alert(`Запрос на вывод предмета "${itemName}" отправлен`);
     }
 
@@ -131,8 +152,15 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             const wonItem = simulateCaseOpening(caseType);
+            
+            // Отправляем данные боту о результате
+            if (tg) {
+                tg.sendData(JSON.stringify({ action: 'open_case', caseType: caseType, wonItem: wonItem }));
+            }
+
             alert(`Вы выиграли: ${wonItem.name} (${wonItem.sell_price} ⭐)`);
 
+            // Оптимистичное обновление
             state.balance -= casePrice;
             state.inventory.push(wonItem);
             updateUI();
@@ -155,9 +183,18 @@ document.addEventListener('DOMContentLoaded', () => {
             { name: "Кольцо", emoji: "💍", sell_price: 100 },
             { name: "Алмаз", emoji: "💎", sell_price: 100 }
         ];
-
-        const index = Math.floor(Math.random() * commonItems.length * (caseType === 'legendary' ? 0.3 : caseType === 'epic' ? 0.5 : 0.8));
-        return commonItems[Math.min(index, commonItems.length - 1)];
+        
+        // Логика шансов (упрощенная)
+        const rand = Math.random();
+        let index;
+        if (caseType === 'legendary' && rand < 0.3) {
+            index = Math.floor(Math.random() * 2) + 8; // Кольцо или Алмаз
+        } else if (caseType === 'epic' && rand < 0.5) {
+             index = Math.floor(Math.random() * 3) + 5; // Букет, Ракета, Кубок
+        } else {
+            index = Math.floor(Math.random() * 5); // Первые 5 предметов
+        }
+        return commonItems[index];
     }
 
     function getCasePrice(caseType) {
@@ -177,9 +214,13 @@ document.addEventListener('DOMContentLoaded', () => {
             window.location.href = `payment.html?user_id=${state.userId}`;
         }
     });
-
+    
+    // Кнопка обновления перезагружает страницу, чтобы получить актуальные данные от бота
     elements.refreshBalanceBtn.addEventListener('click', async () => {
-        alert('Баланс обновлен');
+        alert('Обновление данных... Пожалуйста, подождите.');
+        // Перезагрузка страницы — самый простой способ синхронизации в данной архитектуре,
+        // так как бот заново передаст актуальные данные в URL.
+        window.location.reload();
     });
 
     elements.rouletteCard.addEventListener('click', () => {
@@ -198,5 +239,5 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // Запуск приложения с задержкой для анимации
-    setTimeout(initApp, 1000);
+    setTimeout(initApp, 5000);
 });

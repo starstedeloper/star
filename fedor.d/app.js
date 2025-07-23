@@ -1,5 +1,5 @@
 document.addEventListener('DOMContentLoaded', () => {
-    // Инициализация Telegram WebApp
+    // #мамуебалвВОТЧДЕМО
     const tg = window.Telegram?.WebApp;
     if (tg) {
         tg.expand();
@@ -8,7 +8,6 @@ document.addEventListener('DOMContentLoaded', () => {
         tg.BackButton.onClick(() => tg.close());
     }
 
-    // Состояние приложения
     const state = {
         userId: '0',
         username: 'Гость',
@@ -18,7 +17,6 @@ document.addEventListener('DOMContentLoaded', () => {
         isTelegram: !!tg
     };
 
-    // DOM элементы
     const elements = {
         welcomeScreen: document.getElementById('welcome-screen'),
         appInterface: document.getElementById('app-interface'),
@@ -30,10 +28,8 @@ document.addEventListener('DOMContentLoaded', () => {
         rouletteCard: document.getElementById('roulette-card')
     };
 
-    // Инициализация приложения
     async function initApp() {
         try {
-            // Получаем данные из URL или Telegram WebApp
             const params = new URLSearchParams(window.location.search);
 
             state.userId = params.get('user_id') || (tg?.initDataUnsafe?.user?.id || '0');
@@ -47,30 +43,23 @@ document.addEventListener('DOMContentLoaded', () => {
                 state.inventory = [];
             }
 
-            // Обновляем UI
             updateUI();
-
-            // Показываем основной интерфейс
             showMainInterface();
 
-            // Для отладки
             console.log('App initialized with:', state);
 
         } catch (error) {
             console.error('Initialization error:', error);
-            // Показываем интерфейс даже при ошибке
             showMainInterface();
         }
     }
 
-    // Обновление интерфейса
     function updateUI() {
         elements.userName.textContent = state.username;
         elements.starsBalance.textContent = state.balance;
         renderInventory();
     }
 
-    // Рендер инвентаря
     function renderInventory() {
         elements.inventoryItems.innerHTML = state.inventory.length > 0
             ? state.inventory.map(item => `
@@ -86,7 +75,6 @@ document.addEventListener('DOMContentLoaded', () => {
             `).join('')
             : '<div class="empty-message">Инвентарь пуст</div>';
 
-        // Добавляем обработчики для кнопок
         document.querySelectorAll('.sell-btn').forEach(btn => {
             btn.addEventListener('click', () => sellItem(btn.dataset.id));
         });
@@ -96,13 +84,16 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Показать основной интерфейс
+    // --- ИЗМЕНЕНИЕ ЗДЕСЬ ---
+    // Эта функция исправлена, чтобы переопределять стили !important из CSS
     function showMainInterface() {
-        elements.welcomeScreen.style.display = 'none';
-        elements.appInterface.style.display = 'flex';
+        // Убираем экран загрузки. Используем setProperty, чтобы переопределить '!important'
+        elements.welcomeScreen.style.setProperty('display', 'none', 'important');
+        // Показываем главный интерфейс. Используем setProperty, чтобы переопределить '!important'
+        elements.appInterface.style.setProperty('display', 'flex', 'important');
     }
+    // --- КОНЕЦ ИЗМЕНЕНИЯ ---
 
-    // Функции для работы с предметами
     async function sellItem(itemName) {
         if (state.loading) return;
         state.loading = true;
@@ -111,10 +102,9 @@ document.addEventListener('DOMContentLoaded', () => {
             const item = state.inventory.find(i => i.name === itemName);
             if (!item) return;
 
-            // Здесь должна быть логика продажи через бота
             alert(`Предмет "${item.name}" продан за ${item.sell_price} ⭐`);
 
-            // Обновляем состояние
+            //  состояние
             state.balance += item.sell_price;
             state.inventory = state.inventory.filter(i => i.name !== itemName);
             updateUI();
@@ -129,24 +119,20 @@ document.addEventListener('DOMContentLoaded', () => {
         alert(`Запрос на вывод предмета "${itemName}" отправлен`);
     }
 
-    // Открытие кейса
     async function openCase(caseType) {
         if (state.loading) return;
         state.loading = true;
 
         try {
-            // Проверяем баланс
             const casePrice = getCasePrice(caseType);
             if (state.balance < casePrice) {
                 alert('Недостаточно звезд для открытия этого кейса!');
                 return;
             }
 
-            // Здесь должна быть логика открытия кейса через бота
             const wonItem = simulateCaseOpening(caseType);
             alert(`Вы выиграли: ${wonItem.name} (${wonItem.sell_price} ⭐)`);
 
-            // Обновляем состояние
             state.balance -= casePrice;
             state.inventory.push(wonItem);
             updateUI();
@@ -156,7 +142,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // Симуляция открытия кейса (для демо)
     function simulateCaseOpening(caseType) {
         const commonItems = [
             { name: "Сердце", emoji: "❤️", sell_price: 15 },
@@ -171,7 +156,6 @@ document.addEventListener('DOMContentLoaded', () => {
             { name: "Алмаз", emoji: "💎", sell_price: 100 }
         ];
 
-        // Простая логика - чем дороже кейс, тем лучше шансы
         const index = Math.floor(Math.random() * commonItems.length * (caseType === 'legendary' ? 0.3 : caseType === 'epic' ? 0.5 : 0.8));
         return commonItems[Math.min(index, commonItems.length - 1)];
     }
@@ -186,7 +170,6 @@ document.addEventListener('DOMContentLoaded', () => {
         return prices[caseType] || 10;
     }
 
-    // Обработчики событий
     elements.addStarsBtn.addEventListener('click', () => {
         if (state.isTelegram) {
             tg.openTelegramLink(`https://t.me/StarAzart_bot?start=pay_${state.userId}_100`);
@@ -196,7 +179,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     elements.refreshBalanceBtn.addEventListener('click', async () => {
-        // Здесь должна быть логика обновления баланса
         alert('Баланс обновлен');
     });
 

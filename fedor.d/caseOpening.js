@@ -81,7 +81,7 @@ class CaseOpening {
   }
 }
 
-// Инициализация после загрузки конфига
+
 fetch('config.json')
   .then(response => response.json())
   .then(config => {

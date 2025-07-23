@@ -141,24 +141,27 @@ async def start(message: types.Message):
         cursor = conn.execute('SELECT stars FROM users WHERE user_id = ?', (user_id,))
         stars = cursor.fetchone()[0]
 
+
+        conn.row_factory = sqlite3.Row
         cursor = conn.execute('''
             SELECT item_name as name, item_image as image, sell_price
             FROM inventory WHERE user_id = ?
         ''', (user_id,))
         inventory = cursor.fetchall()
+        inventory_data = [dict(row) for row in inventory]
 
         conn.commit()
 
-    # 4. Формируем URL с ВСЕМИ параметрами
+
     webapp_url = (
         f"https://star-ruddy-three.vercel.app/"
         f"?user_id={user_id}"
         f"&stars={stars}"
-        f"&inventory={json.dumps([dict(item) for item in inventory])}"
+        f"&inventory={json.dumps(inventory_data)}"
         f"&username={username}"
     )
 
-    # 5. Отправляем сообщение с кнопкой
+
     keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
     keyboard.add(types.KeyboardButton(
         "🎰 Открыть мини-приложение",

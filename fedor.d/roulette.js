@@ -34,7 +34,7 @@ class Roulette {
     if (this.isSpinning) return;
     this.isSpinning = true;
 
-    // Выбираем случайный предмет с учетом шансов
+
     const random = Math.random();
     let cumulativeChance = 0;
     let selectedIndex = 0;
@@ -47,7 +47,7 @@ class Roulette {
       }
     }
 
-    // Анимация прокрутки
+
     const itemWidth = 100;
     const targetPosition = -(selectedIndex * itemWidth);
     const spinDuration = 3000 + Math.random() * 2000; // 3-5 секунд
@@ -55,7 +55,7 @@ class Roulette {
     this.itemsContainer.style.transition = `transform ${spinDuration/1000}s cubic-bezier(0.2, 0.1, 0.2, 1)`;
     this.itemsContainer.style.transform = `translateX(${targetPosition - 500}px)`;
 
-    // Частицы
+
     this.createParticles();
 
     setTimeout(() => {
@@ -90,7 +90,7 @@ class Roulette {
     this.container.appendChild(result);
     result.querySelector('.close-roulette').addEventListener('click', () => {
       this.container.remove();
-      // Здесь можно добавить предмет в инвентарь
+      //
     });
   }
 }

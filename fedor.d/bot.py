@@ -1,5 +1,5 @@
 # ==============================================================================
-# ПОЛНЫЙ И ИСПРАВЛЕННЫЙ ФАЙЛ BOT.PY (СОХРАНЕНА ОРИГИНАЛЬНАЯ СТРУКТУРА)
+# ПОЛНЫЙ И ИСПРАВЛЕННЫЙ ФАЙЛ BOT.PY
 # ==============================================================================
 
 from aiogram import Bot, Dispatcher, types
@@ -51,7 +51,7 @@ def init_db():
             CREATE TABLE IF NOT EXISTS inventory (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL,
-                item_id INTEGER NOT NULL,
+                item_id INTEGER,
                 item_name TEXT NOT NULL,
                 item_image TEXT,
                 emoji TEXT,
@@ -144,24 +144,16 @@ async def load_initial_data():
     with sqlite3.connect('users.db') as conn:
         cursor = conn.cursor()
         
-        # Проверяем, есть ли уже кейсы
         cursor.execute('SELECT 1 FROM cases LIMIT 1')
         if not cursor.fetchone():
-            # Добавляем стандартные кейсы
             cases = [
                 ('Обычный кейс', 10, 'common_case.png', '📦'),
                 ('Редкий кейс', 25, 'rare_case.png', '🎁'),
                 ('Эпический кейс', 50, 'epic_case.png', '💎'),
                 ('Легендарный кейс', 100, 'legendary_case.png', '🏆')
             ]
+            cursor.executemany('INSERT INTO cases (name, price, image, emoji) VALUES (?, ?, ?, ?)', cases)
             
-            for case in cases:
-                cursor.execute('''
-                    INSERT INTO cases (name, price, image, emoji)
-                    VALUES (?, ?, ?, ?)
-                ''', case)
-            
-            # Добавляем стандартные предметы
             items = [
                 ('Сердце', 'heart.png', '❤️', 15, 15, 'common'),
                 ('Плюшевый мишка', 'teddy_bear.png', '🧸', 15, 15, 'common'),
@@ -174,35 +166,9 @@ async def load_initial_data():
                 ('Кольцо', 'ring.png', '💍', 100, 100, 'legendary'),
                 ('Алмаз', 'diamond.png', '💎', 100, 100, 'legendary')
             ]
-            
-            for item in items:
-                cursor.execute('''
-                    INSERT INTO items (name, image, emoji, sell_price, withdraw_price, rarity)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                ''', item)
-            
-            # Связываем предметы с кейсами
-            case_items = [
-                (1, 1, 0.18), (1, 2, 0.18), (1, 3, 0.15), (1, 4, 0.15),
-                (1, 5, 0.10), (1, 6, 0.08), (1, 7, 0.07), (1, 8, 0.04),
-                (1, 9, 0.03), (1, 10, 0.02),
-                
-                (2, 3, 0.25), (2, 4, 0.25), (2, 5, 0.20), (2, 6, 0.15),
-                (2, 7, 0.10), (2, 8, 0.03), (2, 9, 0.02),
-                
-                (3, 5, 0.30), (3, 6, 0.25), (3, 7, 0.20), (3, 8, 0.15),
-                (3, 9, 0.07), (3, 10, 0.03),
-                
-                (4, 8, 0.40), (4, 9, 0.35), (4, 10, 0.25)
-            ]
-            
-            for case_item in case_items:
-                cursor.execute('''
-                    INSERT INTO case_items (case_id, item_id, chance)
-                    VALUES (?, ?, ?)
-                ''', case_item)
-            
+            cursor.executemany('INSERT INTO items (name, image, emoji, sell_price, withdraw_price, rarity) VALUES (?, ?, ?, ?, ?, ?)', items)
             conn.commit()
+
 
 # Получение данных пользователя
 async def get_user_data(user_id):
@@ -210,11 +176,9 @@ async def get_user_data(user_id):
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
 
-        # Получаем баланс
         cursor.execute('SELECT stars FROM users WHERE user_id = ?', (user_id,))
         user = cursor.fetchone()
 
-        # Получаем инвентарь
         cursor.execute('''
             SELECT 
                 i.id, i.item_name as name, i.item_image as image, i.emoji, 
@@ -241,228 +205,86 @@ async def create_crypto_invoice(user_id, stars, amount_usd):
             "payload": json.dumps({"user_id": user_id, "stars": stars})
         }
 
-        response = requests.post(
-            f"{CRYPTO_PAY_API}/createInvoice",
-            headers=headers,
-            json=payload
-        )
+        response = requests.post(f"{CRYPTO_PAY_API}/createInvoice", headers=headers, json=payload)
 
         if response.status_code == 201 or response.status_code == 200:
             result = response.json().get('result')
-
             with sqlite3.connect('users.db') as conn:
                 conn.execute('''
                     INSERT INTO payments (invoice_id, user_id, stars, amount_usd, status)
                     VALUES (?, ?, ?, ?, 'pending')
                 ''', (result['invoice_id'], user_id, stars, amount_usd))
                 conn.commit()
-
             return result
         else:
             logging.error(f"Crypto Pay error: {response.text}")
             return None
-
     except Exception as e:
         logging.error(f"Payment error: {e}")
         return None
-
-# Открытие кейса
-async def open_case(user_id, case_id):
-    with sqlite3.connect('users.db') as conn:
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-
-        try:
-            # Проверяем, есть ли у пользователя достаточно звезд
-            cursor.execute('SELECT stars FROM users WHERE user_id = ?', (user_id,))
-            user = cursor.fetchone()
-            if not user:
-                return None, "Пользователь не найден"
-
-            cursor.execute('SELECT price FROM cases WHERE id = ?', (case_id,))
-            case = cursor.fetchone()
-            if not case:
-                return None, "Кейс не найден"
-
-            if user['stars'] < case['price']:
-                return None, "Недостаточно звезд"
-
-            # Выбираем случайный предмет из кейса
-            cursor.execute('''
-                SELECT i.id, i.name, i.image, i.emoji, i.sell_price, i.withdraw_price
-                FROM case_items ci
-                JOIN items i ON ci.item_id = i.id
-                WHERE ci.case_id = ?
-                ORDER BY RANDOM() LIMIT 1
-            ''', (case_id,))
-            won_item = cursor.fetchone()
-
-            if not won_item:
-                return None, "В кейсе нет предметов"
-
-            # Добавляем предмет в инвентарь
-            cursor.execute('''
-                INSERT INTO inventory 
-                (user_id, item_id, item_name, item_image, emoji, sell_price, withdraw_price)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            ''', (user_id, won_item['id'], won_item['name'], won_item['image'], 
-                 won_item['emoji'], won_item['sell_price'], won_item['withdraw_price']))
-
-            # Снимаем звезды
-            cursor.execute('''
-                UPDATE users SET stars = stars - ? WHERE user_id = ?
-            ''', (case['price'], user_id))
-
-            conn.commit()
-
-            return dict(won_item), None
-
-        except Exception as e:
-            conn.rollback()
-            logging.error(f"Error opening case: {e}")
-            return None, "Ошибка при открытии кейса"
 
 # Продажа предмета
 async def sell_item(user_id, item_id):
     with sqlite3.connect('users.db') as conn:
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
-
         try:
-            # Проверяем, есть ли предмет у пользователя
-            cursor.execute('''
-                SELECT id, sell_price FROM inventory 
-                WHERE id = ? AND user_id = ? AND is_withdrawn = FALSE
-            ''', (item_id, user_id))
+            cursor.execute('SELECT id, sell_price FROM inventory WHERE id = ? AND user_id = ? AND is_withdrawn = FALSE', (item_id, user_id))
             item = cursor.fetchone()
+            if not item: return False, "Предмет не найден"
 
-            if not item:
-                return False, "Предмет не найден"
-
-            # Добавляем звезды
-            cursor.execute('''
-                UPDATE users SET stars = stars + ? WHERE user_id = ?
-            ''', (item['sell_price'], user_id))
-
-            # Удаляем предмет из инвентаря
-            cursor.execute('''
-                DELETE FROM inventory WHERE id = ?
-            ''', (item_id,))
-
+            cursor.execute('UPDATE users SET stars = stars + ? WHERE user_id = ?', (item['sell_price'], user_id))
+            cursor.execute('DELETE FROM inventory WHERE id = ?', (item_id,))
             conn.commit()
-
             return True, None
-
         except Exception as e:
-            conn.rollback()
-            logging.error(f"Error selling item: {e}")
-            return False, "Ошибка при продаже предмета"
+            conn.rollback(); logging.error(f"Error selling item: {e}"); return False, "Ошибка при продаже предмета"
 
 # Запрос на вывод предмета
 async def request_withdrawal(user_id, item_id):
     with sqlite3.connect('users.db') as conn:
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
-
         try:
-            # Проверяем, есть ли предмет у пользователя
-            cursor.execute('''
-                SELECT id FROM inventory 
-                WHERE id = ? AND user_id = ? AND is_withdrawn = FALSE
-            ''', (item_id, user_id))
+            cursor.execute('SELECT id FROM inventory WHERE id = ? AND user_id = ? AND is_withdrawn = FALSE', (item_id, user_id))
             item = cursor.fetchone()
-
-            if not item:
-                return False, "Предмет не найден"
-
-            # Создаем запрос на вывод
-            cursor.execute('''
-                INSERT INTO withdrawals (user_id, item_id, status)
-                VALUES (?, ?, 'pending')
-            ''', (user_id, item_id))
-
-            # Помечаем предмет как выводимый
-            cursor.execute('''
-                UPDATE inventory SET is_withdrawn = TRUE WHERE id = ?
-            ''', (item_id,))
-
+            if not item: return False, "Предмет не найден"
+            
+            cursor.execute('INSERT INTO withdrawals (user_id, item_id, status) VALUES (?, ?, \'pending\')', (user_id, item_id))
+            cursor.execute('UPDATE inventory SET is_withdrawn = TRUE WHERE id = ?', (item_id,))
             conn.commit()
-
             return True, None
-
         except Exception as e:
-            conn.rollback()
-            logging.error(f"Error requesting withdrawal: {e}")
-            return False, "Ошибка при запросе вывода"
+            conn.rollback(); logging.error(f"Error requesting withdrawal: {e}"); return False, "Ошибка при запросе вывода"
 
 # Проверка платежей
 async def check_payments():
     while True:
+        await asyncio.sleep(60)
         try:
             with sqlite3.connect('users.db') as conn:
                 conn.row_factory = sqlite3.Row
                 cursor = conn.cursor()
-                
-                # Получаем все pending платежи
-                cursor.execute('''
-                    SELECT * FROM payments 
-                    WHERE status = 'pending' 
-                    AND created_at > datetime('now', '-1 hour')
-                ''')
+                cursor.execute("SELECT * FROM payments WHERE status = 'pending' AND created_at > datetime('now', '-1 hour')")
                 pending_payments = cursor.fetchall()
+                if not pending_payments: continue
 
                 headers = {"Crypto-Pay-API-Token": CRYPTO_PAY_TOKEN}
-
                 for payment in pending_payments:
-                    # Проверяем статус платежа в Crypto Pay
-                    response = requests.get(
-                        f"{CRYPTO_PAY_API}/getInvoices?invoice_ids={payment['invoice_id']}",
-                        headers=headers
-                    )
-
-                    if response.status_code == 200:
-                        invoice = response.json().get('result', {}).get('items', [{}])[0]
-
-                        if invoice.get('status') == 'paid':
-                            # Обновляем баланс пользователя
-                            cursor.execute('''
-                                UPDATE users 
-                                SET stars = stars + ? 
-                                WHERE user_id = ?
-                            ''', (payment['stars'], payment['user_id']))
-
-                            # Обновляем статус платежа
-                            cursor.execute('''
-                                UPDATE payments 
-                                SET status = 'paid', paid_at = CURRENT_TIMESTAMP
-                                WHERE invoice_id = ?
-                            ''', (payment['invoice_id'],))
-
-                            conn.commit()
-
-                            # Уведомляем пользователя
-                            await bot.send_message(
-                                payment['user_id'],
-                                f"✅ Ваш баланс пополнен на {payment['stars']} ⭐"
-                            )
-
-                        elif invoice.get('status') == 'expired':
-                            # Помечаем платеж как просроченный
-                            cursor.execute('''
-                                UPDATE payments 
-                                SET status = 'expired'
-                                WHERE invoice_id = ?
-                            ''', (payment['invoice_id'],))
-                            conn.commit()
-
+                    response = requests.get(f"{CRYPTO_PAY_API}/getInvoices?invoice_ids={payment['invoice_id']}", headers=headers)
+                    if response.status_code != 200: continue
+                    
+                    invoice = response.json().get('result', {}).get('items', [{}])[0]
+                    if invoice.get('status') == 'paid':
+                        cursor.execute('UPDATE users SET stars = stars + ? WHERE user_id = ?', (payment['stars'], payment['user_id']))
+                        cursor.execute("UPDATE payments SET status = 'paid', paid_at = CURRENT_TIMESTAMP WHERE invoice_id = ?", (payment['invoice_id'],))
+                        conn.commit()
+                        await bot.send_message(payment['user_id'], f"✅ Ваш баланс пополнен на {payment['stars']} ⭐")
+                    elif invoice.get('status') == 'expired':
+                        cursor.execute("UPDATE payments SET status = 'expired' WHERE invoice_id = ?", (payment['invoice_id'],))
+                        conn.commit()
         except Exception as e:
             logging.error(f"Payment check error: {e}")
-
-        await asyncio.sleep(60)  # Проверяем каждую минуту
-
-# ==============================================================================
-# НАЧАЛО ИСПРАВЛЕНИЙ
-# ==============================================================================
 
 # Общая функция для вызова при запросе оплаты
 async def process_payment_request(user_id, stars_to_pay):
@@ -475,16 +297,8 @@ async def process_payment_request(user_id, stars_to_pay):
 
     if invoice:
         kb = types.InlineKeyboardMarkup()
-        kb.add(types.InlineKeyboardButton(
-            text="💳 Оплатить сейчас",
-            url=invoice['pay_url']
-        ))
-        await bot.send_message(
-            user_id,
-            f"💎 Счет на {stars_to_pay} ⭐ ({amount_usd:.2f} USDT)\n\n"
-            f"Ссылка для оплаты действительна 1 час.",
-            reply_markup=kb
-        )
+        kb.add(types.InlineKeyboardButton(text="💳 Оплатить сейчас", url=invoice['pay_url']))
+        await bot.send_message(user_id, f"💎 Счет на {stars_to_pay} ⭐ ({amount_usd:.2f} USDT)\n\nСсылка для оплаты действительна 1 час.", reply_markup=kb)
     else:
         await bot.send_message(user_id, "❌ Не удалось создать счет, попробуйте позже")
 
@@ -495,27 +309,39 @@ async def start(message: types.Message):
 
     with sqlite3.connect('users.db') as conn:
         cursor = conn.cursor()
-        cursor.execute('''
-            INSERT INTO users (user_id, username, first_name, last_name, last_active)
-            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
-            ON CONFLICT(user_id) DO UPDATE SET
-            username = excluded.username,
-            first_name = excluded.first_name,
-            last_name = excluded.last_name,
-            last_active = CURRENT_TIMESTAMP
-        ''', (user_id, username, message.from_user.first_name, message.from_user.last_name))
+        
+        # ИСПРАВЛЕНИЕ №1: Проверяем, существует ли пользователь, чтобы не давать бонус повторно
+        cursor.execute("SELECT user_id FROM users WHERE user_id = ?", (user_id,))
+        user_exists = cursor.fetchone()
 
-        if cursor.rowcount > 0:
-            conn.execute('UPDATE users SET stars = stars + 10 WHERE user_id = ?', (user_id,))
-            conn.execute('''
+        if not user_exists:
+            # Новый пользователь: добавляем в базу и даем бонус
+            cursor.execute('''
+                INSERT INTO users (user_id, username, first_name, last_name, last_active, stars)
+                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, 10)
+            ''', (user_id, username, message.from_user.first_name, message.from_user.last_name))
+            
+            cursor.execute('''
                 INSERT INTO inventory (user_id, item_id, item_name, item_image, emoji, sell_price, withdraw_price)
                 SELECT ?, id, name, image, emoji, sell_price, withdraw_price
                 FROM items WHERE rarity = 'common' ORDER BY RANDOM() LIMIT 1
             ''', (user_id,))
+            
             await message.answer("🎉 Вы получили стартовый бонус: 10 ⭐ и случайный предмет!")
+        else:
+            # Существующий пользователь: просто обновляем данные
+            cursor.execute('''
+                UPDATE users SET
+                username = ?,
+                first_name = ?,
+                last_name = ?,
+                last_active = CURRENT_TIMESTAMP
+                WHERE user_id = ?
+            ''', (username, message.from_user.first_name, message.from_user.last_name, user_id))
+        
         conn.commit()
 
-    # ИЗМЕНЕНИЕ №1: Проверяем аргументы (deep link) для оплаты
+    # Проверяем аргументы (deep link) для оплаты
     args = message.get_args()
     if args and args.startswith('pay_'):
         try:
@@ -526,9 +352,9 @@ async def start(message: types.Message):
                 await message.answer("Ошибка в ссылке для оплаты.")
         except (ValueError, IndexError):
             await message.answer("Некорректная ссылка для оплаты.")
-        return # Важно: завершаем, чтобы не отправлять WebApp
+        return
 
-    # ИЗМЕНЕНИЕ №2: Если это обычный /start, передаем ВСЕ данные в URL
+    # Передаем ВСЕ данные в URL для инициализации приложения
     user_data = await get_user_data(user_id)
     inventory_json_str = json.dumps(user_data['inventory'])
     inventory_encoded = urllib.parse.quote(inventory_json_str)
@@ -552,7 +378,6 @@ async def start(message: types.Message):
         reply_markup=keyboard
     )
 
-# Обработка данных из веб-приложения
 @dp.message_handler(content_types=['web_app_data'])
 async def handle_web_app_data(message: types.Message):
     try:
@@ -561,46 +386,63 @@ async def handle_web_app_data(message: types.Message):
         action = data.get('action')
 
         if action == 'open_case':
-            case_id = data.get('case_id')
-            if not case_id:
-                # В реальном приложении можно не отвечать, чтобы не спамить
+            # ИСПРАВЛЕНИЕ №3: Принимаем результат открытия кейса от клиента
+            case_type = data.get('caseType')
+            won_item = data.get('wonItem')
+
+            if not case_type or not won_item:
+                logging.warning(f"Invalid open_case data from {user_id}")
                 return
+
+            case_prices = {'common': 10, 'rare': 25, 'epic': 50, 'legendary': 100}
+            case_price = case_prices.get(case_type)
             
-            won_item, error = await open_case(user_id, case_id)
-            if error:
-                # Можно отправить сообщение об ошибке, но лучше не спамить
-                logging.warning(f"Case opening error for user {user_id}: {error}")
+            if not case_price:
+                logging.warning(f"Invalid case_type '{case_type}' from {user_id}")
                 return
-            # Можно отправить сообщение о выигрыше, но фронтенд уже показал его
-            # await message.answer(f"🎉 Вы открыли кейс и получили: {won_item['name']}!")
+                
+            with sqlite3.connect('users.db') as conn:
+                cursor = conn.cursor()
+                try:
+                    cursor.execute('SELECT stars FROM users WHERE user_id = ?', (user_id,))
+                    user_stars = cursor.fetchone()
+                    if not user_stars or user_stars[0] < case_price:
+                        logging.warning(f"Insufficient funds for {user_id} to open {case_type} case.")
+                        return
+
+                    cursor.execute('UPDATE users SET stars = stars - ? WHERE user_id = ?', (case_price, user_id))
+                    
+                    cursor.execute('SELECT id, image, withdraw_price FROM items WHERE name = ?', (won_item['name'],))
+                    item_details = cursor.fetchone()
+                    item_db_id = item_details[0] if item_details else None
+                    item_image = item_details[1] if item_details else ''
+                    item_withdraw_price = item_details[2] if item_details else won_item['sell_price']
+
+                    cursor.execute('''
+                        INSERT INTO inventory (user_id, item_id, item_name, item_image, emoji, sell_price, withdraw_price)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ''', (user_id, item_db_id, won_item['name'], item_image, won_item.get('emoji', '🎁'), won_item['sell_price'], item_withdraw_price))
+                    
+                    conn.commit()
+                except Exception as e:
+                    conn.rollback()
+                    logging.error(f"Error processing won item for {user_id}: {e}")
 
         elif action == 'sell_item':
-            # ИЗМЕНЕНИЕ №3: Используем item_id вместо itemName
             item_id = data.get('item_id')
-            if not item_id:
-                return
-
-            success, error = await sell_item(user_id, item_id)
-            if not success:
-                logging.warning(f"Failed to sell item {item_id} for user {user_id}: {error}")
+            if item_id: await sell_item(user_id, item_id)
 
         elif action == 'withdraw_item':
-            # ИЗМЕНЕНИЕ №4: Используем item_id
             item_id = data.get('item_id')
-            if not item_id:
-                return
+            if not item_id: return
 
             success, error = await request_withdrawal(user_id, item_id)
-            if not success:
-                logging.warning(f"Failed to withdraw item {item_id} for user {user_id}: {error}")
-            else:
-                # Уведомляем администраторов
+            if success:
                 for admin_id in ADMIN_IDS:
                     try:
                         await bot.send_message(
                             admin_id,
-                            f"🆕 Новый запрос на вывод предмета от пользователя @{message.from_user.username or message.from_user.id}\n"
-                            f"ID предмета: {item_id}"
+                            f"🆕 Новый запрос на вывод предмета от @{message.from_user.username or user_id}\nID предмета: {item_id}"
                         )
                     except Exception as e:
                         logging.error(f"Error notifying admin: {e}")
@@ -610,56 +452,36 @@ async def handle_web_app_data(message: types.Message):
     except Exception as e:
         logging.error(f"WebApp error: {e}")
 
-# Команды администратора (без изменений)
 @dp.message_handler(commands=['admin'])
 async def admin_panel(message: types.Message):
-    user_id = message.from_user.id
-    if user_id not in ADMIN_IDS:
-        await message.answer("❌ У вас нет прав администратора")
-        return
+    if message.from_user.id not in ADMIN_IDS:
+        return await message.answer("❌ У вас нет прав администратора")
 
-    keyboard = types.InlineKeyboardMarkup()
-    keyboard.add(types.InlineKeyboardButton(
-        "📊 Статистика",
-        callback_data="admin_stats"
-    ))
-    keyboard.add(types.InlineKeyboardButton(
-        "📝 Запросы на вывод",
-        callback_data="admin_withdrawals"
-    ))
+    keyboard = types.InlineKeyboardMarkup(row_width=1)
+    keyboard.add(types.InlineKeyboardButton("📊 Статистика", callback_data="admin_stats"))
+    keyboard.add(types.InlineKeyboardButton("📝 Запросы на вывод", callback_data="admin_withdrawals"))
+    await message.answer("👑 Панель администратора", reply_markup=keyboard)
 
-    await message.answer(
-        "👑 Панель администратора",
-        reply_markup=keyboard
-    )
-
-# Обработка callback-запросов (без изменений)
 @dp.callback_query_handler(lambda c: c.data.startswith('admin_'))
 async def process_admin_callback(callback_query: types.CallbackQuery):
     user_id = callback_query.from_user.id
     if user_id not in ADMIN_IDS:
-        await bot.answer_callback_query(callback_query.id, "У вас нет прав администратора")
-        return
+        return await bot.answer_callback_query(callback_query.id, "У вас нет прав")
 
     action = callback_query.data
+    await bot.answer_callback_query(callback_query.id)
 
     if action == 'admin_stats':
         with sqlite3.connect('users.db') as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             cursor.execute('SELECT COUNT(*) as users FROM users')
-            total_users = cursor.fetchone()['users']
+            users = cursor.fetchone()['users']
             cursor.execute('SELECT SUM(stars) as stars FROM users')
-            total_stars = cursor.fetchone()['stars'] or 0
+            stars = cursor.fetchone()['stars'] or 0
             cursor.execute("SELECT COUNT(*) as payments, SUM(amount_usd) as amount FROM payments WHERE status = 'paid'")
-            payments = cursor.fetchone()
-            total_payments = payments['payments'] or 0
-            total_amount = payments['amount'] or 0
-            cursor.execute('SELECT COUNT(*) as cases_opened FROM inventory')
-            cases_opened = cursor.fetchone()['cases_opened']
-            await bot.send_message(user_id, f"📊 Статистика:\n\n👥 Пользователей: {total_users}\n💫 Всего звезд: {total_stars}\n"
-                                          f"💰 Платежей: {total_payments} на сумму {total_amount:.2f} USDT\n🎁 Открыто кейсов: {cases_opened}")
-        await bot.answer_callback_query(callback_query.id)
+            p = cursor.fetchone()
+            await bot.send_message(user_id, f"📊 Статистика:\n\n👥 Пользователей: {users}\n💫 Всего звезд: {stars}\n💰 Платежей: {p['payments'] or 0} на {p['amount'] or 0:.2f} USDT")
 
     elif action == 'admin_withdrawals':
         with sqlite3.connect('users.db') as conn:
@@ -667,36 +489,24 @@ async def process_admin_callback(callback_query: types.CallbackQuery):
             cursor = conn.cursor()
             cursor.execute('''
                 SELECT w.id, u.username, u.first_name, i.item_name, i.emoji, w.created_at
-                FROM withdrawals w
-                JOIN users u ON w.user_id = u.user_id
-                JOIN inventory i ON w.item_id = i.id
+                FROM withdrawals w JOIN users u ON w.user_id = u.user_id JOIN inventory i ON w.item_id = i.id
                 WHERE w.status = 'pending' ORDER BY w.created_at
             ''')
             withdrawals = cursor.fetchall()
             if not withdrawals:
-                await bot.send_message(user_id, "Нет активных запросов на вывод")
-                return
-            for withdrawal in withdrawals:
-                keyboard = types.InlineKeyboardMarkup()
-                keyboard.add(
-                    types.InlineKeyboardButton("✅ Подтвердить", callback_data=f"approve_{withdrawal['id']}"),
-                    types.InlineKeyboardButton("❌ Отклонить", callback_data=f"reject_{withdrawal['id']}")
-                )
-                await bot.send_message(user_id, f"🔄 Запрос на вывод #{withdrawal['id']}\n\n"
-                                                 f"👤 Пользователь: {withdrawal['first_name']} (@{withdrawal['username']})\n"
-                                                 f"🎁 Предмет: {withdrawal['emoji']} {withdrawal['item_name']}\n"
-                                                 f"🕒 Дата: {withdrawal['created_at']}", reply_markup=keyboard)
-        await bot.answer_callback_query(callback_query.id)
+                return await bot.send_message(user_id, "Нет активных запросов на вывод")
+            for w in withdrawals:
+                kb = types.InlineKeyboardMarkup()
+                kb.add(types.InlineKeyboardButton("✅", callback_data=f"approve_{w['id']}"), types.InlineKeyboardButton("❌", callback_data=f"reject_{w['id']}"))
+                await bot.send_message(user_id, f"🔄 Запрос #{w['id']}\n@{w['username']} ({w['first_name']})\n{w['emoji']} {w['item_name']}", reply_markup=kb)
 
-@dp.callback_query_handler(lambda c: c.data.startswith('approve_') or c.data.startswith('reject_'))
+@dp.callback_query_handler(lambda c: c.data.startswith(('approve_', 'reject_')))
 async def process_withdrawal_action(callback_query: types.CallbackQuery):
     user_id = callback_query.from_user.id
-    if user_id not in ADMIN_IDS:
-        return await bot.answer_callback_query(callback_query.id, "У вас нет прав")
-        
-    action, withdrawal_id_str = callback_query.data.split('_')
-    withdrawal_id = int(withdrawal_id_str)
+    if user_id not in ADMIN_IDS: return
 
+    action, withdrawal_id = callback_query.data.split('_')
+    
     with sqlite3.connect('users.db') as conn:
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
@@ -707,23 +517,22 @@ async def process_withdrawal_action(callback_query: types.CallbackQuery):
         ''', (withdrawal_id,))
         info = cursor.fetchone()
         if not info:
-            return await bot.answer_callback_query(callback_query.id, "Запрос уже обработан или не найден")
+            return await bot.answer_callback_query(callback_query.id, "Запрос уже обработан")
 
         if action == 'approve':
-            cursor.execute("UPDATE withdrawals SET status = 'completed', completed_at = CURRENT_TIMESTAMP, admin_id = ? WHERE id = ?", (user_id, withdrawal_id))
+            cursor.execute("UPDATE withdrawals SET status = 'completed', admin_id = ? WHERE id = ?", (user_id, withdrawal_id))
             conn.commit()
-            await bot.send_message(info['user_id'], f"✅ Ваш запрос на вывод предмета {info['emoji']} {info['item_name']} одобрен!")
-            await callback_query.message.edit_text(f"{callback_query.message.text}\n\n✅ ОДОБРЕНО админом @{callback_query.from_user.username}")
+            await bot.send_message(info['user_id'], f"✅ Ваш вывод предмета {info['emoji']} {info['item_name']} одобрен!")
+            await callback_query.message.edit_text(f"{callback_query.message.text}\n\n✅ ОДОБРЕНО")
         elif action == 'reject':
-            cursor.execute("UPDATE withdrawals SET status = 'rejected', completed_at = CURRENT_TIMESTAMP, admin_id = ? WHERE id = ?", (user_id, withdrawal_id))
+            cursor.execute("UPDATE withdrawals SET status = 'rejected', admin_id = ? WHERE id = ?", (user_id, withdrawal_id))
             cursor.execute("UPDATE inventory SET is_withdrawn = FALSE WHERE id = ?", (info['item_inventory_id'],))
             conn.commit()
-            await bot.send_message(info['user_id'], f"❌ Ваш запрос на вывод предмета {info['emoji']} {info['item_name']} отклонен.")
-            await callback_query.message.edit_text(f"{callback_query.message.text}\n\n❌ ОТКЛОНЕНО админом @{callback_query.from_user.username}")
+            await bot.send_message(info['user_id'], f"❌ Ваш вывод предмета {info['emoji']} {info['item_name']} отклонен.")
+            await callback_query.message.edit_text(f"{callback_query.message.text}\n\n❌ ОТКЛОНЕНО")
     
-    await bot.answer_callback_query(callback_query.id, "Действие выполнено")
+    await bot.answer_callback_query(callback_query.id, "Выполнено")
 
-# Запуск бота
 if __name__ == '__main__':
     init_db()
     loop = asyncio.get_event_loop()

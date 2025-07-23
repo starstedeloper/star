@@ -7,6 +7,9 @@ document.addEventListener('DOMContentLoaded', () => {
         tg.BackButton.onClick(() => tg.close());
     }
 
+    // Инициализируем рулетку глобально
+    const roulette = new Roulette();
+
     const state = {
         userId: '0',
         username: 'Гость',
@@ -24,7 +27,9 @@ document.addEventListener('DOMContentLoaded', () => {
         inventoryItems: document.getElementById('inventory-items'),
         addStarsBtn: document.getElementById('add-stars'),
         refreshBalanceBtn: document.getElementById('refresh-balance'),
-        rouletteCard: document.getElementById('roulette-card')
+        rouletteCard: document.getElementById('roulette-card'),
+        casesPage: document.getElementById('cases-page'),
+        closeCasesBtn: document.getElementById('close-cases')
     };
 
     function initApp() {
@@ -38,7 +43,6 @@ document.addEventListener('DOMContentLoaded', () => {
             try {
                 const inventoryParam = params.get('inventory');
                 if (inventoryParam) {
-                    // Декодируем инвентарь из URL
                     state.inventory = JSON.parse(decodeURIComponent(inventoryParam));
                 } else {
                     state.inventory = [];
@@ -50,12 +54,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
             updateUI();
             showMainInterface();
-
             console.log('App initialized with state:', state);
-
         } catch (error) {
             console.error('Initialization error:', error);
-            showMainInterface();
+            showMainInterface(); 
         }
     }
 
@@ -73,8 +75,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     <div class="item-name">${item.name}</div>
                     <div class="item-price">${item.sell_price} ⭐</div>
                     <div class="item-buttons">
-                        <button class="sell-btn" data-id="${item.id}">💰</button>
-                        <button class="withdraw-btn" data-id="${item.id}">📤</button>
+                        <!-- ИЗМЕНЕНИЕ №2: Добавлен текст к кнопкам -->
+                        <button class="sell-btn" data-id="${item.id}">Продать</button>
+                        <button class="withdraw-btn" data-id="${item.id}">Вывести</button>
                     </div>
                 </div>
             `).join('')
@@ -107,16 +110,13 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             if (tg) {
-                // Отправляем ID предмета боту
                 tg.sendData(JSON.stringify({ action: 'sell_item', item_id: itemId }));
             }
             
-            // Оптимистичное обновление: сразу меняем UI
             alert(`Предмет "${item.name}" продан за ${item.sell_price} ⭐`);
             state.balance += item.sell_price;
             state.inventory = state.inventory.filter(i => i.id !== itemId);
             updateUI();
-
         } finally {
             state.loading = false;
         }
@@ -126,18 +126,13 @@ document.addEventListener('DOMContentLoaded', () => {
         if (state.loading) return;
         
         const item = state.inventory.find(i => i.id === itemId);
-        if (!item) {
-            alert("Ошибка: предмет не найден.");
-            return;
-        }
+        if (!item) { alert("Ошибка: предмет не найден."); return; }
 
          if (tg) {
-            // Отправляем ID предмета боту
             tg.sendData(JSON.stringify({ action: 'withdraw_item', item_id: itemId }));
         }
-        alert(`Запрос на вывод предмета "${item.name}" отправлен администратору.`);
+        alert(`Запрос на вывод предмета "${item.name}" отправлен.`);
         
-        // Оптимистичное обновление: убираем предмет из списка
         state.inventory = state.inventory.filter(i => i.id !== itemId);
         updateUI();
     }
@@ -152,47 +147,78 @@ document.addEventListener('DOMContentLoaded', () => {
                 alert('Недостаточно звезд для открытия этого кейса!');
                 return;
             }
-
-            const wonItem = simulateCaseOpening(caseType);
             
+            // Получаем пул предметов для анимации и симулируем выигрыш
+            const { pool, wonItem } = simulateCaseOpening(caseType);
+            
+            // ИЗМЕНЕНИЕ №4: Запускаем анимацию рулетки вместо alert
+            await roulette.spin(pool, wonItem);
+
+            // Отправляем данные боту ПОСЛЕ анимации
             if (tg) {
                 tg.sendData(JSON.stringify({ action: 'open_case', caseType: caseType, wonItem: wonItem }));
             }
 
-            alert(`Вы выиграли: ${wonItem.name} (${wonItem.sell_price} ⭐)`);
-
+            // Обновляем баланс локально
             state.balance -= casePrice;
-            // ВАЖНО: Мы не знаем ID, который создастся в БД.
-            // После открытия кейса лучше всего перезагружать приложение,
-            // чтобы получить инвентарь с настоящими ID.
-            // Для этого можно использовать кнопку "Обновить".
-            // Для оптимистичного обновления можно добавить временный ID, но это рискованно.
-            // wonItem.id = Date.now(); // Временный ID для UI
-            // state.inventory.push(wonItem);
             updateUI();
-            alert("Ваш инвентарь будет обновлен. Нажмите кнопку 'Обновить', чтобы увидеть новый предмет.");
+            
+            alert(`Вы выиграли: ${wonItem.name}! Нажмите "Обновить", чтобы предмет появился в инвентаре.`);
 
-
+        } catch(e) {
+            console.error("Ошибка при открытии кейса:", e);
         } finally {
             state.loading = false;
         }
     }
 
+    // ИЗМЕНЕНИЕ №3: Полностью переработанная логика выпадения предметов
     function simulateCaseOpening(caseType) {
-        const commonItems = [
-            { name: "Сердце", emoji: "❤️", sell_price: 15 }, { name: "Плюшевый мишка", emoji: "🧸", sell_price: 15 },
-            { name: "Подарок", emoji: "🎁", sell_price: 25 }, { name: "Роза", emoji: "🌹", sell_price: 25 },
-            { name: "Торт", emoji: "🎂", sell_price: 50 }, { name: "Букет", emoji: "💐", sell_price: 50 },
-            { name: "Ракета", emoji: "🚀", sell_price: 50 }, { name: "Кубок", emoji: "🏆", sell_price: 100 },
-            { name: "Кольцо", emoji: "💍", sell_price: 100 }, { name: "Алмаз", emoji: "💎", sell_price: 100 }
-        ];
-        // Эта логика симуляции остается на клиенте для быстрого ответа
-        const rand = Math.random();
-        let index;
-        if (caseType === 'legendary' && rand < 0.3) { index = Math.floor(Math.random() * 2) + 8; }
-        else if (caseType === 'epic' && rand < 0.5) { index = Math.floor(Math.random() * 3) + 5; }
-        else { index = Math.floor(Math.random() * 5); }
-        return commonItems[index];
+        const items = {
+            common: [
+                { name: "Сердце", emoji: "❤️", sell_price: 15 }, 
+                { name: "Плюшевый мишка", emoji: "🧸", sell_price: 15 }
+            ],
+            rare: [
+                { name: "Подарок", emoji: "🎁", sell_price: 25 }, 
+                { name: "Роза", emoji: "🌹", sell_price: 25 }
+            ],
+            epic: [
+                { name: "Торт", emoji: "🎂", sell_price: 50 }, 
+                { name: "Букет", emoji: "💐", sell_price: 50 },
+                { name: "Ракета", emoji: "🚀", sell_price: 50 }
+            ],
+            legendary: [
+                { name: "Кубок", emoji: "🏆", sell_price: 100 }, 
+                { name: "Кольцо", emoji: "💍", sell_price: 100 }, 
+                { name: "Алмаз", emoji: "💎", sell_price: 100 }
+            ]
+        };
+
+        let pool = [];
+        // Формируем пул предметов в зависимости от типа кейса
+        switch(caseType) {
+            case 'common':
+                pool = [...items.common, ...items.rare];
+                break;
+            case 'rare':
+                pool = [...items.rare, ...items.epic];
+                break;
+            case 'epic':
+                pool = [...items.epic, ...items.legendary];
+                break;
+            case 'legendary':
+                pool = [...items.legendary, ...items.epic];
+                break;
+            default:
+                pool = items.common;
+        }
+
+        // Выбираем случайный предмет из сформированного пула
+        const wonItem = pool[Math.floor(Math.random() * pool.length)];
+        
+        // Возвращаем и пул для анимации, и сам выигрыш
+        return { pool, wonItem };
     }
 
     function getCasePrice(caseType) {
@@ -200,35 +226,35 @@ document.addEventListener('DOMContentLoaded', () => {
         return prices[caseType] || 10;
     }
 
+    // --- Обработчики событий ---
     elements.addStarsBtn.addEventListener('click', () => {
         if (state.isTelegram) {
-            // Эта ссылка теперь будет правильно обработана ботом
             tg.openTelegramLink(`https://t.me/StarAzart_bot?start=pay_${state.userId}_100`);
         } else {
-            window.location.href = `payment.html?user_id=${state.userId}`;
+            // Для дебага в браузере
+            window.open(`payment.html?user_id=${state.userId}`, '_blank');
         }
     });
     
     elements.refreshBalanceBtn.addEventListener('click', () => {
         alert('Обновление данных...');
-        // Перезагрузка - самый надежный способ синхронизации в данной архитектуре
         window.location.reload();
     });
 
-    // Обработчики для открытия/закрытия страницы кейсов
     elements.rouletteCard.addEventListener('click', () => {
-        document.getElementById('cases-page').style.display = 'flex';
+        elements.casesPage.style.display = 'flex';
     });
-    document.getElementById('close-cases').addEventListener('click', () => {
-        document.getElementById('cases-page').style.display = 'none';
+    
+    elements.closeCasesBtn.addEventListener('click', () => {
+        elements.casesPage.style.display = 'none';
     });
+    
     document.querySelectorAll('.case-card').forEach(card => {
         card.addEventListener('click', () => {
-            document.getElementById('cases-page').style.display = 'none';
+            elements.casesPage.style.display = 'none';
             openCase(card.dataset.case);
         });
     });
 
-    // Запуск приложения с задержкой для анимации
-    setTimeout(initApp, 5000);
+    setTimeout(initApp, 2000); // Уменьшил задержку для скорости
 });

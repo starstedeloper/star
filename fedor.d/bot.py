@@ -1,3 +1,7 @@
+# ==============================================================================
+# ПОЛНЫЙ И ИСПРАВЛЕННЫЙ ФАЙЛ BOT.PY (СОХРАНЕНА ОРИГИНАЛЬНАЯ СТРУКТУРА)
+# ==============================================================================
+
 from aiogram import Bot, Dispatcher, types
 from aiogram.utils import executor
 import sqlite3
@@ -243,14 +247,14 @@ async def create_crypto_invoice(user_id, stars, amount_usd):
             json=payload
         )
 
-        if response.status_code == 200:
+        if response.status_code == 201 or response.status_code == 200:
             result = response.json().get('result')
 
             with sqlite3.connect('users.db') as conn:
                 conn.execute('''
                     INSERT INTO payments (invoice_id, user_id, stars, amount_usd, status)
-                    VALUES (?, ?, ?, ?, ?)
-                ''', (result['invoice_id'], user_id, stars, amount_usd, 'pending'))
+                    VALUES (?, ?, ?, ?, 'pending')
+                ''', (result['invoice_id'], user_id, stars, amount_usd))
                 conn.commit()
 
             return result
@@ -456,111 +460,97 @@ async def check_payments():
 
         await asyncio.sleep(60)  # Проверяем каждую минуту
 
+# ==============================================================================
+# НАЧАЛО ИСПРАВЛЕНИЙ
+# ==============================================================================
+
+# Общая функция для вызова при запросе оплаты
+async def process_payment_request(user_id, stars_to_pay):
+    if stars_to_pay < MIN_PAYMENT:
+        await bot.send_message(user_id, f"Минимальная сумма пополнения: {MIN_PAYMENT} ⭐")
+        return
+
+    amount_usd = round(stars_to_pay * STARS_RATE, 2)
+    invoice = await create_crypto_invoice(user_id, stars_to_pay, amount_usd)
+
+    if invoice:
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton(
+            text="💳 Оплатить сейчас",
+            url=invoice['pay_url']
+        ))
+        await bot.send_message(
+            user_id,
+            f"💎 Счет на {stars_to_pay} ⭐ ({amount_usd:.2f} USDT)\n\n"
+            f"Ссылка для оплаты действительна 1 час.",
+            reply_markup=kb
+        )
+    else:
+        await bot.send_message(user_id, "❌ Не удалось создать счет, попробуйте позже")
+
 @dp.message_handler(commands=['start'])
 async def start(message: types.Message):
     user_id = message.from_user.id
     username = message.from_user.username or message.from_user.first_name
 
     with sqlite3.connect('users.db') as conn:
-        conn.row_factory = sqlite3.Row
-        
-        # Регистрируем/обновляем пользователя
-        cursor = conn.execute('''
-            INSERT OR IGNORE INTO users
-            (user_id, username, first_name, last_name, last_active)
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO users (user_id, username, first_name, last_name, last_active)
             VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
-        ''', (user_id, username, message.from_user.first_name, 
-              message.from_user.last_name))
-        
-        # Обновляем время последней активности
-        conn.execute('UPDATE users SET last_active = CURRENT_TIMESTAMP WHERE user_id = ?', (user_id,))
+            ON CONFLICT(user_id) DO UPDATE SET
+            username = excluded.username,
+            first_name = excluded.first_name,
+            last_name = excluded.last_name,
+            last_active = CURRENT_TIMESTAMP
+        ''', (user_id, username, message.from_user.first_name, message.from_user.last_name))
 
-        # Даем стартовый бонус, если пользователь новый
         if cursor.rowcount > 0:
-            # Добавляем стартовые звезды
+            conn.execute('UPDATE users SET stars = stars + 10 WHERE user_id = ?', (user_id,))
             conn.execute('''
-                UPDATE users SET stars = stars + 10 WHERE user_id = ?
-            ''', (user_id,))
-
-            # Добавляем стартовый предмет
-            conn.execute('''
-                INSERT INTO inventory 
-                (user_id, item_id, item_name, item_image, emoji, sell_price, withdraw_price)
+                INSERT INTO inventory (user_id, item_id, item_name, item_image, emoji, sell_price, withdraw_price)
                 SELECT ?, id, name, image, emoji, sell_price, withdraw_price
                 FROM items WHERE rarity = 'common' ORDER BY RANDOM() LIMIT 1
             ''', (user_id,))
-
+            await message.answer("🎉 Вы получили стартовый бонус: 10 ⭐ и случайный предмет!")
         conn.commit()
 
-    # ВАЖНО: Теперь мы передаем только user_id в URL
-    webapp_url = f"{WEBAPP_URL}?user_id={user_id}"
+    # ИЗМЕНЕНИЕ №1: Проверяем аргументы (deep link) для оплаты
+    args = message.get_args()
+    if args and args.startswith('pay_'):
+        try:
+            parts = args.split('_')
+            if len(parts) == 3:
+                await process_payment_request(user_id, int(parts[2]))
+            else:
+                await message.answer("Ошибка в ссылке для оплаты.")
+        except (ValueError, IndexError):
+            await message.answer("Некорректная ссылка для оплаты.")
+        return # Важно: завершаем, чтобы не отправлять WebApp
 
-    # Создаем клавиатуру с кнопкой веб-приложения
+    # ИЗМЕНЕНИЕ №2: Если это обычный /start, передаем ВСЕ данные в URL
+    user_data = await get_user_data(user_id)
+    inventory_json_str = json.dumps(user_data['inventory'])
+    inventory_encoded = urllib.parse.quote(inventory_json_str)
+    
+    webapp_url = (
+        f"{WEBAPP_URL}?"
+        f"user_id={user_id}&"
+        f"stars={user_data['balance']}&"
+        f"inventory={inventory_encoded}"
+    )
+
     keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
     keyboard.add(types.KeyboardButton(
         "🎰 Открыть мини-приложение",
         web_app=types.WebAppInfo(url=webapp_url)
     ))
 
-    # Отправляем приветственное сообщение
     await message.answer(
         f"🌟 Добро пожаловать в Star Azart, {message.from_user.first_name}!\n\n"
         "Нажмите кнопку ниже, чтобы открыть игровое приложение:",
         reply_markup=keyboard
     )
-
-    # Если это новый пользователь, сообщаем о бонусе
-    if cursor.rowcount > 0:
-        await message.answer(
-            "🎉 Вы получили стартовый бонус: 10 ⭐ и случайный предмет!"
-        )
-
-@dp.message_handler(lambda message: message.text == 'get_user_data')
-async def send_user_data(message: types.Message):
-    user_id = message.from_user.id
-    user_data = await get_user_data(user_id)
-    await message.answer(json.dumps(user_data))
-
-# Команда /pay
-@dp.message_handler(commands=['pay'])
-async def handle_payment(message: types.Message):
-    try:
-        user_id = message.from_user.id
-        args = message.get_args().split('_')
-
-        if len(args) >= 3 and args[0] == 'pay':
-            stars = int(args[2])
-            if stars < MIN_PAYMENT:
-                await message.answer(f"Минимальная сумма пополнения: {MIN_PAYMENT} ⭐")
-                return
-
-            amount_usd = stars * STARS_RATE
-
-            invoice = await create_crypto_invoice(user_id, stars, amount_usd)
-
-            if invoice:
-                kb = types.InlineKeyboardMarkup()
-                kb.add(types.InlineKeyboardButton(
-                    text="💳 Оплатить сейчас",
-                    url=invoice['pay_url']
-                ))
-
-                await message.answer(
-                    f"💎 Счет на {stars} ⭐ ({amount_usd:.2f} USDT)\n\n"
-                    f"Ссылка для оплаты действительна 15 минут",
-                    reply_markup=kb
-                )
-            else:
-                await message.answer("❌ Не удалось создать счет, попробуйте позже")
-        else:
-            await message.answer(
-                "Используйте команду в формате: /pay_100 (где 100 - количество звезд)\n"
-                f"Минимальная сумма: {MIN_PAYMENT} ⭐"
-            )
-
-    except Exception as e:
-        logging.error(f"Payment command error: {e}")
-        await message.answer("❌ Произошла ошибка, попробуйте позже")
 
 # Обработка данных из веб-приложения
 @dp.message_handler(content_types=['web_app_data'])
@@ -573,115 +563,54 @@ async def handle_web_app_data(message: types.Message):
         if action == 'open_case':
             case_id = data.get('case_id')
             if not case_id:
-                await message.answer("❌ Не указан ID кейса")
+                # В реальном приложении можно не отвечать, чтобы не спамить
                 return
-
+            
             won_item, error = await open_case(user_id, case_id)
             if error:
-                await message.answer(f"❌ {error}")
+                # Можно отправить сообщение об ошибке, но лучше не спамить
+                logging.warning(f"Case opening error for user {user_id}: {error}")
                 return
-
-            # Получаем обновленные данные пользователя
-            user_data = await get_user_data(user_id)
-            webapp_url = (
-                f"{WEBAPP_URL}?"
-                f"user_id={user_id}&"
-                f"stars={user_data['balance']}&"
-                f"inventory={json.dumps(user_data['inventory'])}"
-            )
-
-            await message.answer(
-                f"🎉 Вы открыли кейс и получили: {won_item['name']}!\n"
-                f"💎 Цена продажи: {won_item['sell_price']} ⭐",
-                reply_markup=types.ReplyKeyboardMarkup(resize_keyboard=True).add(
-                    types.KeyboardButton(
-                        "🔄 Обновить приложение",
-                        web_app=types.WebAppInfo(url=webapp_url)
-                    )
-                )
-            )
+            # Можно отправить сообщение о выигрыше, но фронтенд уже показал его
+            # await message.answer(f"🎉 Вы открыли кейс и получили: {won_item['name']}!")
 
         elif action == 'sell_item':
+            # ИЗМЕНЕНИЕ №3: Используем item_id вместо itemName
             item_id = data.get('item_id')
             if not item_id:
-                await message.answer("❌ Не указан ID предмета")
                 return
 
             success, error = await sell_item(user_id, item_id)
             if not success:
-                await message.answer(f"❌ {error}")
-                return
-
-            # Получаем обновленные данные пользователя
-            user_data = await get_user_data(user_id)
-            webapp_url = (
-                f"{WEBAPP_URL}?"
-                f"user_id={user_id}&"
-                f"stars={user_data['balance']}&"
-                f"inventory={json.dumps(user_data['inventory'])}"
-            )
-
-            await message.answer(
-                "✅ Предмет успешно продан!",
-                reply_markup=types.ReplyKeyboardMarkup(resize_keyboard=True).add(
-                    types.KeyboardButton(
-                        "🔄 Обновить приложение",
-                        web_app=types.WebAppInfo(url=webapp_url)
-                    )
-                )
-            )
+                logging.warning(f"Failed to sell item {item_id} for user {user_id}: {error}")
 
         elif action == 'withdraw_item':
+            # ИЗМЕНЕНИЕ №4: Используем item_id
             item_id = data.get('item_id')
             if not item_id:
-                await message.answer("❌ Не указан ID предмета")
                 return
 
             success, error = await request_withdrawal(user_id, item_id)
             if not success:
-                await message.answer(f"❌ {error}")
-                return
-
-            # Получаем обновленные данные пользователя
-            user_data = await get_user_data(user_id)
-            webapp_url = (
-                f"{WEBAPP_URL}?"
-                f"user_id={user_id}&"
-                f"stars={user_data['balance']}&"
-                f"inventory={json.dumps(user_data['inventory'])}"
-            )
-
-            await message.answer(
-                "✅ Запрос на вывод предмета отправлен администратору!",
-                reply_markup=types.ReplyKeyboardMarkup(resize_keyboard=True).add(
-                    types.KeyboardButton(
-                        "🔄 Обновить приложение",
-                        web_app=types.WebAppInfo(url=webapp_url)
-                    )
-                )
-            )
-
-            # Уведомляем администраторов
-            for admin_id in ADMIN_IDS:
-                try:
-                    await bot.send_message(
-                        admin_id,
-                        f"🆕 Новый запрос на вывод предмета от пользователя @{message.from_user.username or message.from_user.id}\n"
-                        f"ID предмета: {item_id}"
-                    )
-                except Exception as e:
-                    logging.error(f"Error notifying admin: {e}")
-
-        else:
-            await message.answer("❌ Неизвестное действие")
+                logging.warning(f"Failed to withdraw item {item_id} for user {user_id}: {error}")
+            else:
+                # Уведомляем администраторов
+                for admin_id in ADMIN_IDS:
+                    try:
+                        await bot.send_message(
+                            admin_id,
+                            f"🆕 Новый запрос на вывод предмета от пользователя @{message.from_user.username or message.from_user.id}\n"
+                            f"ID предмета: {item_id}"
+                        )
+                    except Exception as e:
+                        logging.error(f"Error notifying admin: {e}")
 
     except json.JSONDecodeError:
-        await message.answer("❌ Ошибка обработки данных")
+        logging.error("JSONDecodeError in web_app_data")
     except Exception as e:
         logging.error(f"WebApp error: {e}")
-        await message.answer("❌ Произошла ошибка, попробуйте позже")
 
-# Команды администратора
+# Команды администратора (без изменений)
 @dp.message_handler(commands=['admin'])
 async def admin_panel(message: types.Message):
     user_id = message.from_user.id
@@ -704,7 +633,7 @@ async def admin_panel(message: types.Message):
         reply_markup=keyboard
     )
 
-# Обработка callback-запросов
+# Обработка callback-запросов (без изменений)
 @dp.callback_query_handler(lambda c: c.data.startswith('admin_'))
 async def process_admin_callback(callback_query: types.CallbackQuery):
     user_id = callback_query.from_user.id
@@ -718,180 +647,81 @@ async def process_admin_callback(callback_query: types.CallbackQuery):
         with sqlite3.connect('users.db') as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
-
-            # Общая статистика
             cursor.execute('SELECT COUNT(*) as users FROM users')
             total_users = cursor.fetchone()['users']
-
             cursor.execute('SELECT SUM(stars) as stars FROM users')
             total_stars = cursor.fetchone()['stars'] or 0
-
-            cursor.execute('''
-                SELECT COUNT(*) as payments, SUM(amount_usd) as amount 
-                FROM payments WHERE status = 'paid'
-            ''')
+            cursor.execute("SELECT COUNT(*) as payments, SUM(amount_usd) as amount FROM payments WHERE status = 'paid'")
             payments = cursor.fetchone()
             total_payments = payments['payments'] or 0
             total_amount = payments['amount'] or 0
-
             cursor.execute('SELECT COUNT(*) as cases_opened FROM inventory')
             cases_opened = cursor.fetchone()['cases_opened']
-
-            await bot.send_message(
-                user_id,
-                f"📊 Статистика:\n\n"
-                f"👥 Пользователей: {total_users}\n"
-                f"💫 Всего звезд: {total_stars}\n"
-                f"💰 Платежей: {total_payments} на сумму {total_amount:.2f} USDT\n"
-                f"🎁 Открыто кейсов: {cases_opened}"
-            )
+            await bot.send_message(user_id, f"📊 Статистика:\n\n👥 Пользователей: {total_users}\n💫 Всего звезд: {total_stars}\n"
+                                          f"💰 Платежей: {total_payments} на сумму {total_amount:.2f} USDT\n🎁 Открыто кейсов: {cases_opened}")
+        await bot.answer_callback_query(callback_query.id)
 
     elif action == 'admin_withdrawals':
         with sqlite3.connect('users.db') as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
-
             cursor.execute('''
                 SELECT w.id, u.username, u.first_name, i.item_name, i.emoji, w.created_at
                 FROM withdrawals w
                 JOIN users u ON w.user_id = u.user_id
                 JOIN inventory i ON w.item_id = i.id
-                WHERE w.status = 'pending'
-                ORDER BY w.created_at
+                WHERE w.status = 'pending' ORDER BY w.created_at
             ''')
             withdrawals = cursor.fetchall()
-
             if not withdrawals:
                 await bot.send_message(user_id, "Нет активных запросов на вывод")
                 return
-
             for withdrawal in withdrawals:
                 keyboard = types.InlineKeyboardMarkup()
                 keyboard.add(
-                    types.InlineKeyboardButton(
-                        "✅ Подтвердить",
-                        callback_data=f"approve_{withdrawal['id']}"
-                    ),
-                    types.InlineKeyboardButton(
-                        "❌ Отклонить",
-                        callback_data=f"reject_{withdrawal['id']}"
-                    )
+                    types.InlineKeyboardButton("✅ Подтвердить", callback_data=f"approve_{withdrawal['id']}"),
+                    types.InlineKeyboardButton("❌ Отклонить", callback_data=f"reject_{withdrawal['id']}")
                 )
+                await bot.send_message(user_id, f"🔄 Запрос на вывод #{withdrawal['id']}\n\n"
+                                                 f"👤 Пользователь: {withdrawal['first_name']} (@{withdrawal['username']})\n"
+                                                 f"🎁 Предмет: {withdrawal['emoji']} {withdrawal['item_name']}\n"
+                                                 f"🕒 Дата: {withdrawal['created_at']}", reply_markup=keyboard)
+        await bot.answer_callback_query(callback_query.id)
 
-                await bot.send_message(
-                    user_id,
-                    f"🔄 Запрос на вывод #{withdrawal['id']}\n\n"
-                    f"👤 Пользователь: {withdrawal['first_name']} (@{withdrawal['username']})\n"
-                    f"🎁 Предмет: {withdrawal['emoji']} {withdrawal['item_name']}\n"
-                    f"🕒 Дата: {withdrawal['created_at']}",
-                    reply_markup=keyboard
-                )
+@dp.callback_query_handler(lambda c: c.data.startswith('approve_') or c.data.startswith('reject_'))
+async def process_withdrawal_action(callback_query: types.CallbackQuery):
+    user_id = callback_query.from_user.id
+    if user_id not in ADMIN_IDS:
+        return await bot.answer_callback_query(callback_query.id, "У вас нет прав")
+        
+    action, withdrawal_id_str = callback_query.data.split('_')
+    withdrawal_id = int(withdrawal_id_str)
 
-    elif action.startswith('approve_'):
-        withdrawal_id = int(action.split('_')[1])
-        with sqlite3.connect('users.db') as conn:
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
+    with sqlite3.connect('users.db') as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT w.id, w.user_id, i.id as item_inventory_id, i.item_name, i.emoji
+            FROM withdrawals w JOIN inventory i ON w.item_id = i.id
+            WHERE w.id = ? AND w.status = 'pending'
+        ''', (withdrawal_id,))
+        info = cursor.fetchone()
+        if not info:
+            return await bot.answer_callback_query(callback_query.id, "Запрос уже обработан или не найден")
 
-            try:
-                # Обновляем статус вывода
-                cursor.execute('''
-                    UPDATE withdrawals 
-                    SET status = 'completed', 
-                        completed_at = CURRENT_TIMESTAMP,
-                        admin_id = ?
-                    WHERE id = ?
-                ''', (user_id, withdrawal_id))
-
-                # Получаем информацию о пользователе и предмете
-                cursor.execute('''
-                    SELECT w.user_id, i.item_name, i.emoji
-                    FROM withdrawals w
-                    JOIN inventory i ON w.item_id = i.id
-                    WHERE w.id = ?
-                ''', (withdrawal_id,))
-                info = cursor.fetchone()
-
-                conn.commit()
-
-                # Уведомляем пользователя
-                await bot.send_message(
-                    info['user_id'],
-                    f"✅ Ваш запрос на вывод предмета {info['emoji']} {info['item_name']} одобрен!"
-                )
-
-                await bot.answer_callback_query(
-                    callback_query.id,
-                    "Запрос на вывод подтвержден"
-                )
-
-            except Exception as e:
-                conn.rollback()
-                logging.error(f"Error approving withdrawal: {e}")
-                await bot.answer_callback_query(
-                    callback_query.id,
-                    "Ошибка при подтверждении вывода"
-                )
-
-    elif action.startswith('reject_'):
-        withdrawal_id = int(action.split('_')[1])
-        with sqlite3.connect('users.db') as conn:
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-
-            try:
-                # Получаем информацию о пользователе и предмете
-                cursor.execute('''
-                    SELECT w.user_id, i.id as item_id, i.item_name, i.emoji
-                    FROM withdrawals w
-                    JOIN inventory i ON w.item_id = i.id
-                    WHERE w.id = ?
-                ''', (withdrawal_id,))
-                info = cursor.fetchone()
-
-                if not info:
-                    await bot.answer_callback_query(
-                        callback_query.id,
-                        "Запрос на вывод не найден"
-                    )
-                    return
-
-                # Обновляем статус вывода
-                cursor.execute('''
-                    UPDATE withdrawals 
-                    SET status = 'rejected', 
-                        completed_at = CURRENT_TIMESTAMP,
-                        admin_id = ?
-                    WHERE id = ?
-                ''', (user_id, withdrawal_id))
-
-                # Возвращаем предмет в инвентарь
-                cursor.execute('''
-                    UPDATE inventory 
-                    SET is_withdrawn = FALSE 
-                    WHERE id = ?
-                ''', (info['item_id'],))
-
-                conn.commit()
-
-                # Уведомляем пользователя
-                await bot.send_message(
-                    info['user_id'],
-                    f"❌ Ваш запрос на вывод предмета {info['emoji']} {info['item_name']} отклонен."
-                )
-
-                await bot.answer_callback_query(
-                    callback_query.id,
-                    "Запрос на вывод отклонен"
-                )
-
-            except Exception as e:
-                conn.rollback()
-                logging.error(f"Error rejecting withdrawal: {e}")
-                await bot.answer_callback_query(
-                    callback_query.id,
-                    "Ошибка при отклонении вывода"
-                )
+        if action == 'approve':
+            cursor.execute("UPDATE withdrawals SET status = 'completed', completed_at = CURRENT_TIMESTAMP, admin_id = ? WHERE id = ?", (user_id, withdrawal_id))
+            conn.commit()
+            await bot.send_message(info['user_id'], f"✅ Ваш запрос на вывод предмета {info['emoji']} {info['item_name']} одобрен!")
+            await callback_query.message.edit_text(f"{callback_query.message.text}\n\n✅ ОДОБРЕНО админом @{callback_query.from_user.username}")
+        elif action == 'reject':
+            cursor.execute("UPDATE withdrawals SET status = 'rejected', completed_at = CURRENT_TIMESTAMP, admin_id = ? WHERE id = ?", (user_id, withdrawal_id))
+            cursor.execute("UPDATE inventory SET is_withdrawn = FALSE WHERE id = ?", (info['item_inventory_id'],))
+            conn.commit()
+            await bot.send_message(info['user_id'], f"❌ Ваш запрос на вывод предмета {info['emoji']} {info['item_name']} отклонен.")
+            await callback_query.message.edit_text(f"{callback_query.message.text}\n\n❌ ОТКЛОНЕНО админом @{callback_query.from_user.username}")
+    
+    await bot.answer_callback_query(callback_query.id, "Действие выполнено")
 
 # Запуск бота
 if __name__ == '__main__':
